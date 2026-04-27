@@ -99,7 +99,7 @@ class ASNRangeTest(APIViewTestCases.APIViewTestCase):
         rir = RIR.objects.first()
         asnrange = ASNRange.objects.create(name='Range 1', slug='range-1', rir=rir, start=101, end=110)
         url = reverse('ipam-api:asnrange-available-asns', kwargs={'pk': asnrange.pk})
-        self.add_permissions('ipam.view_asnrange', 'ipam.add_asn')
+        self.add_permissions('ipam.view_asnrange', 'ipam.add_asn', 'ipam.view_rir')
 
         data = {
             'description': 'New ASN'
@@ -116,7 +116,7 @@ class ASNRangeTest(APIViewTestCases.APIViewTestCase):
         rir = RIR.objects.first()
         asnrange = ASNRange.objects.create(name='Range 1', slug='range-1', rir=rir, start=101, end=110)
         url = reverse('ipam-api:asnrange-available-asns', kwargs={'pk': asnrange.pk})
-        self.add_permissions('ipam.view_asnrange', 'ipam.add_asn')
+        self.add_permissions('ipam.view_asnrange', 'ipam.add_asn', 'ipam.view_rir')
 
         # Try to create eleven ASNs (only ten are available)
         data = [
@@ -469,7 +469,7 @@ class PrefixTest(APIViewTestCases.APIViewTestCase):
         vrf = VRF.objects.create(name='VRF 1')
         prefix = Prefix.objects.create(prefix=IPNetwork('192.0.2.0/28'), vrf=vrf, is_pool=True)
         url = reverse('ipam-api:prefix-available-prefixes', kwargs={'pk': prefix.pk})
-        self.add_permissions('ipam.view_prefix', 'ipam.add_prefix')
+        self.add_permissions('ipam.view_prefix', 'ipam.add_prefix', 'ipam.view_vrf')
 
         # Create four available prefixes with individual requests
         prefixes_to_be_created = [
@@ -506,7 +506,7 @@ class PrefixTest(APIViewTestCases.APIViewTestCase):
         vrf = VRF.objects.create(name='VRF 1')
         prefix = Prefix.objects.create(prefix=IPNetwork('192.0.2.0/28'), vrf=vrf, is_pool=True)
         url = reverse('ipam-api:prefix-available-prefixes', kwargs={'pk': prefix.pk})
-        self.add_permissions('ipam.view_prefix', 'ipam.add_prefix')
+        self.add_permissions('ipam.view_prefix', 'ipam.add_prefix', 'ipam.view_vrf')
 
         # Try to create five /30s (only four are available)
         data = [
@@ -557,7 +557,7 @@ class PrefixTest(APIViewTestCases.APIViewTestCase):
         vrf = VRF.objects.create(name='VRF 1')
         prefix = Prefix.objects.create(prefix=IPNetwork('192.0.2.0/30'), vrf=vrf, is_pool=True)
         url = reverse('ipam-api:prefix-available-ips', kwargs={'pk': prefix.pk})
-        self.add_permissions('ipam.view_prefix', 'ipam.add_ipaddress')
+        self.add_permissions('ipam.view_prefix', 'ipam.add_ipaddress', 'ipam.view_vrf')
 
         # Create all four available IPs with individual requests
         for i in range(1, 5):
@@ -581,7 +581,7 @@ class PrefixTest(APIViewTestCases.APIViewTestCase):
         vrf = VRF.objects.create(name='VRF 1')
         prefix = Prefix.objects.create(prefix=IPNetwork('192.0.2.0/29'), vrf=vrf, is_pool=True)
         url = reverse('ipam-api:prefix-available-ips', kwargs={'pk': prefix.pk})
-        self.add_permissions('ipam.view_prefix', 'ipam.add_ipaddress')
+        self.add_permissions('ipam.view_prefix', 'ipam.add_ipaddress', 'ipam.view_vrf')
 
         # Try to create nine IPs (only eight are available)
         data = [{'description': f'Test IP {i}'} for i in range(1, 10)]  # 9 IPs
@@ -703,7 +703,7 @@ class IPRangeTest(APIViewTestCases.APIViewTestCase):
             vrf=vrf
         )
         url = reverse('ipam-api:iprange-available-ips', kwargs={'pk': iprange.pk})
-        self.add_permissions('ipam.view_iprange', 'ipam.add_ipaddress')
+        self.add_permissions('ipam.view_iprange', 'ipam.add_ipaddress', 'ipam.view_vrf')
 
         # Create all three available IPs with individual requests
         for i in range(1, 4):

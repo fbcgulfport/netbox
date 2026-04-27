@@ -43,15 +43,83 @@ class BaseModelSerializer(serializers.ModelSerializer):
 
         super().__init__(*args, **kwargs)
 
-    def to_internal_value(self, data):
+    def represents_related_object(self):
+        """
+        Return True if this serializer instance is being used to represent a
+        related object within a parent serializer.
+        """
+        return self.nested
 
+    def get_related_object_queryset(self):
+        """
+        Return the queryset used to resolve a related object supplied via nested
+        serializer input.
+        """
+        queryset = self.Meta.model.objects.all()
+        request = self.context.get('request')
+
+        if request is not None and hasattr(queryset, 'restrict'):
+            queryset = queryset.restrict(getattr(request, 'user', None), 'view')
+
+        return queryset
+
+    def has_related_object_view_permission(self, instance):
+        """
+        Return True if the current user may view the related object represented
+        by this nested serializer.
+        """
+        if not self.represents_related_object():
+            return True
+
+        if instance is None or instance.pk is None:
+            return True
+
+        request = self.context.get('request')
+
+        if request is None:
+            return True
+
+        queryset = self.get_related_object_queryset()
+
+        if not hasattr(queryset, 'restrict'):
+            return True
+
+        cache = self.context.setdefault('_related_object_view_permission_cache', {})
+        cache_key = (self.Meta.model._meta.label_lower, instance.pk)
+
+        if cache_key not in cache:
+            cache[cache_key] = queryset.filter(pk=instance.pk).exists()
+
+        return cache[cache_key]
+
+    def get_restricted_related_object_representation(self, instance):
+        """
+        Return a redacted representation for a related object the user may not
+        view directly.
+        """
+        return {
+            'id': instance.pk,
+        }
+
+    def to_internal_value(self, data):
+        """
+        Override to_internal_value() to handle nested serializer input.
+        """
         # If initialized as a nested serializer, we should expect to receive the attrs or PK
         # identifying a related object.
-        if self.nested:
-            queryset = self.Meta.model.objects.all()
-            return get_related_object_by_attrs(queryset, data)
+        if self.represents_related_object():
+            return get_related_object_by_attrs(self.get_related_object_queryset(), data)
 
         return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        """
+        Override to_representation() to handle restricted related object representation.
+        """
+        if not self.has_related_object_view_permission(instance):
+            return self.get_restricted_related_object_representation(instance)
+
+        return super().to_representation(instance)
 
     @cached_property
     def fields(self):

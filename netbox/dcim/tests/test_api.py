@@ -57,7 +57,10 @@ class Mixins:
             cable = Cable(a_terminations=[obj], b_terminations=[peer_obj], label='Cable 1')
             cable.save()
 
-            self.add_permissions(f'dcim.view_{self.model._meta.model_name}')
+            self.add_permissions(
+                f'dcim.view_{self.model._meta.model_name}',
+                f'dcim.view_{self.peer_termination_type._meta.model_name}',
+            )
             url = reverse(f'dcim-api:{self.model._meta.model_name}-trace', kwargs={'pk': obj.pk})
             response = self.client.get(url, **self.header)
 
@@ -1955,7 +1958,7 @@ class InterfaceTest(Mixins.ComponentTraceMixin, APIViewTestCases.APIViewTestCase
         'description': 'New description',
     }
     peer_termination_type = Interface
-    user_permissions = ('dcim.view_device', )
+    user_permissions = ('dcim.view_device', 'ipam.view_vlan')
 
     @classmethod
     def setUpTestData(cls):

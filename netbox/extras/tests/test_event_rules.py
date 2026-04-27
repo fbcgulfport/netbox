@@ -25,6 +25,11 @@ from utilities.testing import APITestCase
 
 
 class EventRuleTest(APITestCase):
+    user_permissions = (
+        'dcim.add_site',
+        'dcim.change_site',
+        'extras.view_tag',
+    )
 
     def setUp(self):
         super().setUp()

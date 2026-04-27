@@ -199,6 +199,7 @@ class TokenTest(
 ):
     model = Token
     brief_fields = ['description', 'display', 'enabled', 'id', 'key', 'url', 'version', 'write_enabled']
+    user_permissions = ('users.view_user',)
     bulk_update_data = {
         'description': 'New description',
     }
@@ -207,7 +208,10 @@ class TokenTest(
         super().setUp()
 
         # Apply grant_token permission to enable the creation of Tokens for other Users
-        self.add_permissions('users.grant_token')
+        self.add_permissions(
+            'users.grant_token',
+            'users.view_user',
+        )
 
     @classmethod
     def setUpTestData(cls):
@@ -294,7 +298,10 @@ class TokenTest(
         # Clear grant_token permission assigned by setUpTestData
         ObjectPermission.objects.filter(users=self.user).delete()
 
-        self.add_permissions('users.add_token')
+        self.add_permissions(
+            'users.add_token',
+            'users.view_user',
+        )
         user2 = User.objects.create_user(username='testuser2')
         data = {
             'user': user2.id,
@@ -490,6 +497,10 @@ class OwnerGroupTest(APIViewTestCases.APIViewTestCase):
 
 class OwnerTest(APIViewTestCases.APIViewTestCase):
     model = Owner
+    user_permissions = (
+        'users.view_group',
+        'users.view_user',
+    )
     brief_fields = ['description', 'display', 'id', 'name', 'url']
 
     @classmethod

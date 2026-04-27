@@ -142,7 +142,14 @@ class ChangeLogViewTest(ModelViewTestCase):
             'path': self._get_url('delete', instance=site),
             'data': post_data({'confirm': True}),
         }
-        self.add_permissions('dcim.delete_site')
+        self.add_permissions(
+            'dcim.add_module',
+            'dcim.delete_site',
+            'dcim.view_device',
+            'dcim.view_modulebay',
+            'dcim.view_moduletype',
+            'extras.view_tag',
+        )
         response = self.client.post(**request)
         self.assertHttpStatus(response, 302)
 
@@ -442,7 +449,7 @@ class ChangeLogAPITest(APITestCase):
         }
         self.assertEqual(ObjectChange.objects.count(), 0)
         url = reverse('dcim-api:site-list')
-        self.add_permissions('dcim.add_site')
+        self.add_permissions('dcim.add_site', 'extras.view_tag')
 
         response = self.client.post(url, data, format='json', **self.header)
         self.assertHttpStatus(response, status.HTTP_201_CREATED)
@@ -474,7 +481,7 @@ class ChangeLogAPITest(APITestCase):
             ]
         }
         self.assertEqual(ObjectChange.objects.count(), 0)
-        self.add_permissions('dcim.change_site')
+        self.add_permissions('dcim.change_site', 'extras.view_tag')
         url = reverse('dcim-api:site-detail', kwargs={'pk': site.pk})
 
         response = self.client.put(url, data, format='json', **self.header)
@@ -641,7 +648,15 @@ class ChangeLogAPITest(APITestCase):
         device = create_test_device('device1')
         module_bay = ModuleBay.objects.create(device=device, name='Module Bay 1')
         module_type = ModuleType.objects.create(manufacturer=Manufacturer.objects.first(), model='Module Type 1')
-        self.add_permissions('dcim.add_module', 'dcim.add_interface', 'dcim.delete_module')
+        self.add_permissions(
+            'dcim.add_module',
+            'dcim.add_interface',
+            'dcim.delete_module',
+            'dcim.view_device',
+            'dcim.view_module',
+            'dcim.view_modulebay',
+            'dcim.view_moduletype',
+        )
         self.assertEqual(ObjectChange.objects.count(), 0)  # Sanity check
 
         # Create a new Module

@@ -423,6 +423,7 @@ class BookmarkTest(
 ):
     model = Bookmark
     brief_fields = ['display', 'id', 'object_id', 'object_type', 'url']
+    user_permissions = ('users.view_user',)
 
     @classmethod
     def setUpTestData(cls):
@@ -1196,6 +1197,7 @@ class CreatedUpdatedFilterTest(APITestCase):
 class SubscriptionTest(APIViewTestCases.APIViewTestCase):
     model = Subscription
     brief_fields = ['display', 'id', 'object_id', 'object_type', 'url', 'user']
+    user_permissions = ('users.view_user',)
 
     @classmethod
     def setUpTestData(cls):
@@ -1332,6 +1334,7 @@ class NotificationGroupTest(APIViewTestCases.APIViewTestCase):
 class NotificationTest(APIViewTestCases.APIViewTestCase):
     model = Notification
     brief_fields = ['display', 'event_type', 'id', 'object_id', 'object_type', 'read', 'url', 'user']
+    user_permissions = ('users.view_user',)
     bulk_update_data = {
         'read': now(),
     }

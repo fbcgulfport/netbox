@@ -473,7 +473,7 @@ class VMInterfaceTest(APIViewTestCases.APIViewTestCase):
             },
         }
 
-        self.add_permissions('ipam.change_prefix')
+        self.add_permissions('ipam.change_prefix', 'virtualization.view_vminterface')
 
         response = self.client.patch(url, data, format='json', **self.header)
         self.assertEqual(response.status_code, 200)

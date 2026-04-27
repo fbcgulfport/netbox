@@ -32,7 +32,7 @@ class WritableNestedSerializerTest(APITestCase):
             'site': self.site1.pk,
         }
         url = reverse('ipam-api:vlan-list')
-        self.add_permissions('ipam.add_vlan')
+        self.add_permissions('dcim.view_site', 'ipam.add_vlan')
 
         response = self.client.post(url, data, format='json', **self.header)
         self.assertHttpStatus(response, status.HTTP_201_CREATED)
@@ -64,7 +64,7 @@ class WritableNestedSerializerTest(APITestCase):
             },
         }
         url = reverse('ipam-api:vlan-list')
-        self.add_permissions('ipam.add_vlan')
+        self.add_permissions('dcim.view_site', 'ipam.add_vlan')
 
         response = self.client.post(url, data, format='json', **self.header)
         self.assertHttpStatus(response, status.HTTP_201_CREATED)
@@ -100,7 +100,7 @@ class WritableNestedSerializerTest(APITestCase):
             },
         }
         url = reverse('ipam-api:vlan-list')
-        self.add_permissions('ipam.add_vlan')
+        self.add_permissions('dcim.view_region', 'dcim.view_site', 'ipam.add_vlan')
 
         with disable_warnings('django.request'):
             response = self.client.post(url, data, format='json', **self.header)
