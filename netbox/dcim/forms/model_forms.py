@@ -1,3 +1,5 @@
+import decimal
+
 from django import forms
 from django.contrib.contenttypes.models import ContentType
 from django.core.validators import EMPTY_VALUES
@@ -429,8 +431,8 @@ class DeviceTypeForm(PrimaryModelForm):
     fieldsets = (
         FieldSet('manufacturer', 'model', 'slug', 'default_platform', 'description', 'tags', name=_('Device Type')),
         FieldSet(
-            'u_height', 'exclude_from_utilization', 'is_full_depth', 'part_number', 'subdevice_role', 'airflow',
-            'weight', 'weight_unit', name=_('Chassis')
+            'u_height', 'rack_position_width', 'exclude_from_utilization', 'is_full_depth', 'part_number',
+            'subdevice_role', 'airflow', 'weight', 'weight_unit', name=_('Chassis')
         ),
         FieldSet('front_image', 'rear_image', name=_('Images')),
     )
@@ -438,9 +440,9 @@ class DeviceTypeForm(PrimaryModelForm):
     class Meta:
         model = DeviceType
         fields = [
-            'manufacturer', 'model', 'slug', 'default_platform', 'part_number', 'u_height', 'exclude_from_utilization',
-            'is_full_depth', 'subdevice_role', 'airflow', 'weight', 'weight_unit', 'front_image', 'rear_image',
-            'description', 'owner', 'comments', 'tags',
+            'manufacturer', 'model', 'slug', 'default_platform', 'part_number', 'u_height', 'rack_position_width',
+            'exclude_from_utilization', 'is_full_depth', 'subdevice_role', 'airflow', 'weight', 'weight_unit',
+            'front_image', 'rear_image', 'description', 'owner', 'comments', 'tags',
         ]
         widgets = {
             'front_image': ClearableFileInput(attrs={
@@ -644,8 +646,11 @@ class DeviceForm(TenancyForm, PrimaryModelForm):
         widget=APISelect(
             api_url='/api/dcim/racks/{{rack}}/elevation/',
             attrs={
-                'ts-disabled-field': 'device',
-                'data-dynamic-params': '[{"fieldName":"face","queryParam":"face"}]'
+                'ts-disabled-field': 'unavailable',
+                'data-dynamic-params': '[{"fieldName":"face","queryParam":"face"},'
+                                       '{"fieldName":"device_type","queryParam":"device_type_id"},'
+                                       '{"fieldName":"rack_position_offset","queryParam":"rack_position_offset"},'
+                                       '{"fieldName":"rack_position_width","queryParam":"rack_position_width"}]'
             },
         )
     )
@@ -656,6 +661,20 @@ class DeviceForm(TenancyForm, PrimaryModelForm):
         widget=ClearableSelect(
             requires_fields=['rack']
         )
+    )
+    rack_position_offset = forms.DecimalField(
+        label=_('Rack row offset'),
+        required=False,
+        min_value=0,
+        max_value=1,
+        help_text=_('Horizontal offset from the left edge of the rack row, as a fraction of row width')
+    )
+    rack_position_width = forms.DecimalField(
+        label=_('Rack row width'),
+        required=False,
+        min_value=decimal.Decimal('0.01'),
+        max_value=1,
+        help_text=_('Fraction of a rack row occupied by this device; defaults to the device type width')
     )
     device_type = DynamicModelChoiceField(
         label=_('Device type'),
@@ -721,7 +740,8 @@ class DeviceForm(TenancyForm, PrimaryModelForm):
         model = Device
         fields = [
             'name', 'role', 'device_type', 'serial', 'asset_tag', 'site', 'rack', 'location', 'position', 'face',
-            'latitude', 'longitude', 'status', 'airflow', 'platform', 'primary_ip4', 'primary_ip6', 'oob_ip', 'cluster',
+            'rack_position_offset', 'rack_position_width', 'latitude', 'longitude', 'status', 'airflow', 'platform',
+            'primary_ip4', 'primary_ip6', 'oob_ip', 'cluster',
             'tenant_group', 'tenant', 'virtual_chassis', 'vc_position', 'vc_priority', 'description', 'config_template',
             'owner', 'comments', 'tags', 'local_context_data',
         ]

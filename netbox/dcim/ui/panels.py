@@ -130,6 +130,7 @@ class DeviceDeviceTypePanel(panels.ObjectAttributesPanel):
     manufacturer = attrs.RelatedObjectAttr('device_type.manufacturer', linkify=True)
     model = attrs.RelatedObjectAttr('device_type', linkify=True)
     height = attrs.TemplatedAttr('device_type.u_height', template_name='dcim/devicetype/attrs/height.html')
+    rack_position_width = attrs.NumericAttr('device_type.rack_position_width', label=_('Rack row width'))
     front_image = attrs.ImageAttr('device_type.front_image')
     rear_image = attrs.ImageAttr('device_type.rear_image')
 
@@ -153,6 +154,7 @@ class DeviceTypePanel(panels.ObjectAttributesPanel):
     default_platform = attrs.RelatedObjectAttr('default_platform', linkify=True)
     description = attrs.TextAttr('description')
     height = attrs.TemplatedAttr('u_height', template_name='dcim/devicetype/attrs/height.html')
+    rack_position_width = attrs.NumericAttr('rack_position_width', label=_('Rack row width'))
     exclude_from_utilization = attrs.BooleanAttr('exclude_from_utilization')
     full_depth = attrs.BooleanAttr('is_full_depth')
     weight = attrs.NumericAttr('weight', unit_accessor='get_weight_unit_display')

@@ -169,6 +169,14 @@ class DeviceTable(TenancyColumnsMixin, ContactsColumnMixin, PrimaryModelTable):
         verbose_name=_('Position'),
         template_code='{{ value|floatformat }}'
     )
+    rack_position_offset = columns.TemplateColumn(
+        verbose_name=_('Rack Row Offset'),
+        template_code='{{ value|floatformat }}'
+    )
+    rack_position_width = columns.TemplateColumn(
+        verbose_name=_('Rack Row Width'),
+        template_code='{{ value|floatformat }}'
+    )
     role = columns.ColoredLabelColumn(
         verbose_name=_('Role')
     )
@@ -274,8 +282,9 @@ class DeviceTable(TenancyColumnsMixin, ContactsColumnMixin, PrimaryModelTable):
         fields = (
             'pk', 'id', 'name', 'status', 'tenant', 'tenant_group', 'role', 'manufacturer', 'device_type',
             'serial', 'asset_tag', 'region', 'site_group', 'site', 'location', 'rack', 'parent_device',
-            'device_bay_position', 'position', 'face', 'latitude', 'longitude', 'airflow', 'primary_ip', 'primary_ip4',
-            'primary_ip6', 'oob_ip', 'cluster', 'virtual_chassis', 'vc_position', 'vc_priority', 'description',
+            'device_bay_position', 'position', 'face', 'rack_position_offset', 'rack_position_width', 'latitude',
+            'longitude', 'airflow', 'primary_ip', 'primary_ip4', 'primary_ip6', 'oob_ip', 'cluster',
+            'virtual_chassis', 'vc_position', 'vc_priority', 'description',
             'config_template', 'comments', 'contacts', 'tags', 'created', 'last_updated',
         )
         default_columns = (

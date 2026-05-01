@@ -2,7 +2,7 @@
 <span>
   {{ value|linkify }}
   {% if value and object.position %}
-    (U{{ object.position|floatformat }} / {{ object.get_face_display }})
+    (U{{ object.position|floatformat }} / {{ object.get_face_display }}{% if object.rack_position_offset or object.rack_position_width != 1 %} / {{ object.rack_position_width|floatformat }}w @ {{ object.rack_position_offset|floatformat }}{% endif %})
   {% elif value and object.device_type.u_height %}
     <span class="badge text-bg-warning">{% trans "Not racked" %}</span>
   {% endif %}

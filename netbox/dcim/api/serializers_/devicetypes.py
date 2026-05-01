@@ -29,6 +29,13 @@ class DeviceTypeSerializer(PrimaryModelSerializer):
         min_value=decimal.Decimal(0),
         default=1.0
     )
+    rack_position_width = serializers.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        min_value=decimal.Decimal('0.01'),
+        max_value=decimal.Decimal(1),
+        default=decimal.Decimal(1)
+    )
     subdevice_role = ChoiceField(choices=SubdeviceRoleChoices, allow_blank=True, required=False, allow_null=True)
     airflow = ChoiceField(choices=DeviceAirflowChoices, allow_blank=True, required=False, allow_null=True)
     weight_unit = ChoiceField(choices=WeightUnitChoices, allow_blank=True, required=False, allow_null=True)
@@ -52,8 +59,9 @@ class DeviceTypeSerializer(PrimaryModelSerializer):
         model = DeviceType
         fields = [
             'id', 'url', 'display_url', 'display', 'manufacturer', 'default_platform', 'model', 'slug', 'part_number',
-            'u_height', 'exclude_from_utilization', 'is_full_depth', 'subdevice_role', 'airflow', 'weight',
-            'weight_unit', 'front_image', 'rear_image', 'description', 'owner', 'comments', 'tags', 'custom_fields',
+            'u_height', 'rack_position_width', 'exclude_from_utilization', 'is_full_depth', 'subdevice_role',
+            'airflow', 'weight', 'weight_unit', 'front_image', 'rear_image', 'description', 'owner', 'comments',
+            'tags', 'custom_fields',
             'created', 'last_updated', 'device_count', 'console_port_template_count',
             'console_server_port_template_count', 'power_port_template_count', 'power_outlet_template_count',
             'interface_template_count', 'front_port_template_count', 'rear_port_template_count',

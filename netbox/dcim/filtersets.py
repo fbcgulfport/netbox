@@ -726,8 +726,8 @@ class DeviceTypeFilterSet(PrimaryModelFilterSet):
     class Meta:
         model = DeviceType
         fields = (
-            'id', 'model', 'slug', 'part_number', 'u_height', 'exclude_from_utilization', 'is_full_depth',
-            'subdevice_role', 'airflow', 'weight', 'weight_unit', 'description',
+            'id', 'model', 'slug', 'part_number', 'u_height', 'rack_position_width', 'exclude_from_utilization',
+            'is_full_depth', 'subdevice_role', 'airflow', 'weight', 'weight_unit', 'description',
 
             # Counters
             'console_port_template_count',
@@ -1450,8 +1450,8 @@ class DeviceFilterSet(
     class Meta:
         model = Device
         fields = (
-            'id', 'asset_tag', 'face', 'position', 'latitude', 'longitude', 'airflow', 'vc_position', 'vc_priority',
-            'description',
+            'id', 'asset_tag', 'face', 'position', 'rack_position_offset', 'rack_position_width', 'latitude',
+            'longitude', 'airflow', 'vc_position', 'vc_priority', 'description',
 
             # Counters
             'console_port_count',

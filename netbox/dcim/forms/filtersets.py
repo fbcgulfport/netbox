@@ -1,3 +1,5 @@
+import decimal
+
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
@@ -560,7 +562,7 @@ class DeviceTypeFilterForm(PrimaryModelFilterSetForm):
     fieldsets = (
         FieldSet('q', 'filter_id', 'tag'),
         FieldSet(
-            'manufacturer_id', 'default_platform_id', 'part_number', 'device_count',
+            'manufacturer_id', 'default_platform_id', 'part_number', 'device_count', 'rack_position_width',
             'subdevice_role', 'airflow', name=_('Hardware')
         ),
         FieldSet('has_front_image', 'has_rear_image', name=_('Images')),
@@ -590,6 +592,12 @@ class DeviceTypeFilterForm(PrimaryModelFilterSetForm):
         label=_('Device count'),
         required=False,
         min_value=0,
+    )
+    rack_position_width = forms.DecimalField(
+        label=_('Rack row width'),
+        required=False,
+        min_value=decimal.Decimal('0.01'),
+        max_value=1,
     )
     subdevice_role = forms.MultipleChoiceField(
         label=_('Subdevice role'),
@@ -850,7 +858,10 @@ class DeviceFilterForm(
     model = Device
     fieldsets = (
         FieldSet('q', 'filter_id', 'tag'),
-        FieldSet('region_id', 'site_group_id', 'site_id', 'location_id', 'rack_id', name=_('Location')),
+        FieldSet(
+            'region_id', 'site_group_id', 'site_id', 'location_id', 'rack_id', 'rack_position_offset',
+            'rack_position_width', name=_('Location')
+        ),
         FieldSet('status', 'role_id', 'airflow', 'serial', 'asset_tag', 'mac_address', name=_('Operation')),
         FieldSet('manufacturer_id', 'device_type_id', 'platform_id', name=_('Hardware')),
         FieldSet('tenant_group_id', 'tenant_id', name=_('Tenant')),
@@ -905,6 +916,18 @@ class DeviceFilterForm(
             'location_id': '$location_id',
         },
         label=_('Rack')
+    )
+    rack_position_offset = forms.DecimalField(
+        label=_('Rack row offset'),
+        required=False,
+        min_value=0,
+        max_value=1,
+    )
+    rack_position_width = forms.DecimalField(
+        label=_('Rack row width'),
+        required=False,
+        min_value=decimal.Decimal('0.01'),
+        max_value=1,
     )
     role_id = DynamicModelMultipleChoiceField(
         queryset=DeviceRole.objects.all(),

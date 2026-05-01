@@ -234,12 +234,21 @@ class RackViewSet(NetBoxModelViewSet):
             )
             return HttpResponse(drawing.tostring(), content_type='image/svg+xml')
 
+        rack_position_width = data['rack_position_width']
+        if rack_position_width is None and data['device_type_id']:
+            rack_position_width = DeviceType.objects.filter(pk=data['device_type_id']).values_list(
+                'rack_position_width', flat=True
+            ).first()
+        rack_position_width = rack_position_width or 1
+
         # Return a JSON representation of the rack units in the elevation
         elevation = rack.get_rack_units(
             face=data['face'],
             user=request.user,
             exclude=data['exclude'],
-            expand_devices=data['expand_devices']
+            expand_devices=data['expand_devices'],
+            rack_position_offset=data['rack_position_offset'],
+            rack_position_width=rack_position_width
         )
 
         # Enable filtering rack units by ID

@@ -56,6 +56,20 @@ class DeviceSerializer(PrimaryModelSerializer):
         min_value=decimal.Decimal(0.5),
         default=None
     )
+    rack_position_offset = serializers.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        min_value=decimal.Decimal(0),
+        max_value=decimal.Decimal(1),
+        default=decimal.Decimal(0)
+    )
+    rack_position_width = serializers.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        min_value=decimal.Decimal('0.01'),
+        max_value=decimal.Decimal(1),
+        required=False
+    )
     status = ChoiceField(choices=DeviceStatusChoices, required=False)
     airflow = ChoiceField(choices=DeviceAirflowChoices, allow_blank=True, required=False)
     primary_ip = IPAddressSerializer(
@@ -104,12 +118,13 @@ class DeviceSerializer(PrimaryModelSerializer):
         model = Device
         fields = [
             'id', 'url', 'display_url', 'display', 'name', 'device_type', 'role', 'tenant', 'platform', 'serial',
-            'asset_tag', 'site', 'location', 'rack', 'position', 'face', 'latitude', 'longitude', 'parent_device',
-            'status', 'airflow', 'primary_ip', 'primary_ip4', 'primary_ip6', 'oob_ip', 'cluster', 'virtual_chassis',
-            'vc_position', 'vc_priority', 'description', 'owner', 'comments', 'config_template', 'local_context_data',
-            'tags', 'custom_fields', 'created', 'last_updated', 'console_port_count', 'console_server_port_count',
-            'power_port_count', 'power_outlet_count', 'interface_count', 'front_port_count', 'rear_port_count',
-            'device_bay_count', 'module_bay_count', 'inventory_item_count',
+            'asset_tag', 'site', 'location', 'rack', 'position', 'face', 'rack_position_offset',
+            'rack_position_width', 'latitude', 'longitude', 'parent_device', 'status', 'airflow', 'primary_ip',
+            'primary_ip4', 'primary_ip6', 'oob_ip', 'cluster', 'virtual_chassis', 'vc_position', 'vc_priority',
+            'description', 'owner', 'comments', 'config_template', 'local_context_data', 'tags', 'custom_fields',
+            'created', 'last_updated', 'console_port_count', 'console_server_port_count', 'power_port_count',
+            'power_outlet_count', 'interface_count', 'front_port_count', 'rear_port_count', 'device_bay_count',
+            'module_bay_count', 'inventory_item_count',
         ]
         brief_fields = ('id', 'url', 'display', 'name', 'description')
 
@@ -131,12 +146,13 @@ class DeviceWithConfigContextSerializer(DeviceSerializer):
     class Meta(DeviceSerializer.Meta):
         fields = [
             'id', 'url', 'display_url', 'display', 'name', 'device_type', 'role', 'tenant', 'platform', 'serial',
-            'asset_tag', 'site', 'location', 'rack', 'position', 'face', 'latitude', 'longitude', 'parent_device',
-            'status', 'airflow', 'primary_ip', 'primary_ip4', 'primary_ip6', 'oob_ip', 'cluster', 'virtual_chassis',
-            'vc_position', 'vc_priority', 'description', 'owner', 'comments', 'config_template', 'config_context',
-            'local_context_data', 'tags', 'custom_fields', 'created', 'last_updated', 'console_port_count',
-            'console_server_port_count', 'power_port_count', 'power_outlet_count', 'interface_count',
-            'front_port_count', 'rear_port_count', 'device_bay_count', 'module_bay_count', 'inventory_item_count',
+            'asset_tag', 'site', 'location', 'rack', 'position', 'face', 'rack_position_offset',
+            'rack_position_width', 'latitude', 'longitude', 'parent_device', 'status', 'airflow', 'primary_ip',
+            'primary_ip4', 'primary_ip6', 'oob_ip', 'cluster', 'virtual_chassis', 'vc_position', 'vc_priority',
+            'description', 'owner', 'comments', 'config_template', 'config_context', 'local_context_data', 'tags',
+            'custom_fields', 'created', 'last_updated', 'console_port_count', 'console_server_port_count',
+            'power_port_count', 'power_outlet_count', 'interface_count', 'front_port_count', 'rear_port_count',
+            'device_bay_count', 'module_bay_count', 'inventory_item_count',
         ]
 
     @extend_schema_field(serializers.JSONField(allow_null=True))

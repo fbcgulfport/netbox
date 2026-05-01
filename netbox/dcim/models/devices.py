@@ -109,6 +109,14 @@ class DeviceType(ImageAttachmentsMixin, PrimaryModel, WeightMixin):
         default=1.0,
         verbose_name=_('height (U)')
     )
+    rack_position_width = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=1.0,
+        validators=[MinValueValidator(decimal.Decimal('0.01')), MaxValueValidator(decimal.Decimal('1.00'))],
+        verbose_name=_('rack row width'),
+        help_text=_('Default fraction of a rack row occupied by devices of this type')
+    )
     exclude_from_utilization = models.BooleanField(
         default=False,
         verbose_name=_('exclude from utilization'),
@@ -191,8 +199,8 @@ class DeviceType(ImageAttachmentsMixin, PrimaryModel, WeightMixin):
     )
 
     clone_fields = (
-        'manufacturer', 'default_platform', 'u_height', 'is_full_depth', 'subdevice_role', 'airflow', 'weight',
-        'weight_unit',
+        'manufacturer', 'default_platform', 'u_height', 'rack_position_width', 'is_full_depth', 'subdevice_role',
+        'airflow', 'weight', 'weight_unit',
     )
     prerequisite_models = (
         'dcim.Manufacturer',
@@ -305,16 +313,23 @@ class DeviceType(ImageAttachmentsMixin, PrimaryModel, WeightMixin):
                 'u_height': _("U height must be in increments of 0.5 rack units.")
             })
 
+        if self.rack_position_width and self.rack_position_width > decimal.Decimal(1):
+            raise ValidationError({
+                'rack_position_width': _("Rack row width cannot exceed 1.00.")
+            })
+
         # If editing an existing DeviceType to have a larger u_height, first validate that *all* instances of it have
         # room to expand within their racks. This validation will impose a very high performance penalty when there are
         # many instances to check, but increasing the u_height of a DeviceType should be a very rare occurrence.
         if not self._state.adding and self.u_height > self._original_u_height:
             for d in Device.objects.filter(device_type=self, position__isnull=False):
-                face_required = None if self.is_full_depth else d.face
                 u_available = d.rack.get_available_units(
                     u_height=self.u_height,
-                    rack_face=face_required,
-                    exclude=[d.pk]
+                    rack_face=d.face,
+                    exclude=[d.pk],
+                    rack_position_offset=d.rack_position_offset,
+                    rack_position_width=d.rack_position_width,
+                    is_full_depth=self.is_full_depth
                 )
                 if d.position not in u_available:
                     raise ValidationError({
@@ -588,6 +603,23 @@ class Device(
         verbose_name=_('position (U)'),
         help_text=_('The lowest-numbered unit occupied by the device')
     )
+    rack_position_offset = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        blank=True,
+        default=0,
+        validators=[MinValueValidator(decimal.Decimal('0.00')), MaxValueValidator(decimal.Decimal('1.00'))],
+        verbose_name=_('rack row offset'),
+        help_text=_('Horizontal offset from the left edge of the rack row, as a fraction of row width')
+    )
+    rack_position_width = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        blank=True,
+        validators=[MinValueValidator(decimal.Decimal('0.01')), MaxValueValidator(decimal.Decimal('1.00'))],
+        verbose_name=_('rack row width'),
+        help_text=_('Fraction of a rack row occupied by this device')
+    )
     face = models.CharField(
         max_length=50,
         blank=True,
@@ -735,8 +767,8 @@ class Device(
     objects = ConfigContextModelQuerySet.as_manager()
 
     clone_fields = (
-        'device_type', 'role', 'tenant', 'platform', 'site', 'location', 'rack', 'face', 'status', 'airflow',
-        'cluster', 'virtual_chassis',
+        'device_type', 'role', 'tenant', 'platform', 'site', 'location', 'rack', 'face', 'rack_position_offset',
+        'rack_position_width', 'status', 'airflow', 'cluster', 'virtual_chassis',
     )
     prerequisite_models = (
         'dcim.Site',
@@ -761,13 +793,12 @@ class Device(
                 violation_error_message=_("Device name must be unique per site.")
             ),
             models.UniqueConstraint(
-                fields=('rack', 'position', 'face'),
-                name='%(app_label)s_%(class)s_unique_rack_position_face'
-            ),
-            models.UniqueConstraint(
                 fields=('virtual_chassis', 'vc_position'),
                 name='%(app_label)s_%(class)s_unique_virtual_chassis_vc_position'
             ),
+        )
+        indexes = (
+            models.Index(fields=('rack', 'position', 'face'), name='dcim_device_rack_pos_face_idx'),
         )
         verbose_name = _('device')
         verbose_name_plural = _('devices')
@@ -817,6 +848,15 @@ class Device(
                     'position': _("Cannot select a rack position without assigning a rack."),
                 })
 
+        if self.rack_position_offset is None:
+            self.rack_position_offset = decimal.Decimal(0)
+        if self.rack_position_width is None and hasattr(self, 'device_type'):
+            self.rack_position_width = self.device_type.rack_position_width
+        if self.rack_position_width and self.rack_position_offset + self.rack_position_width > decimal.Decimal(1):
+            raise ValidationError({
+                'rack_position_width': _("Rack row offset and width cannot exceed 1.00."),
+            })
+
         # Validate rack position and face
         if self.position and self.position % decimal.Decimal(0.5):
             raise ValidationError({
@@ -856,10 +896,14 @@ class Device(
                     })
 
                 # Validate rack space
-                rack_face = self.face if not self.device_type.is_full_depth else None
                 exclude_list = [self.pk] if self.pk else []
                 available_units = self.rack.get_available_units(
-                    u_height=self.device_type.u_height, rack_face=rack_face, exclude=exclude_list
+                    u_height=self.device_type.u_height,
+                    rack_face=self.face,
+                    exclude=exclude_list,
+                    rack_position_offset=self.rack_position_offset,
+                    rack_position_width=self.rack_position_width,
+                    is_full_depth=self.device_type.is_full_depth
                 )
                 if self.position and self.position not in available_units:
                     raise ValidationError({
@@ -1039,6 +1083,12 @@ class Device(
         # Inherit airflow attribute from DeviceType if not set
         if is_new and not self.airflow:
             self.airflow = self.device_type.airflow
+
+        # Set default rack row placement values if not set
+        if self.rack_position_offset is None:
+            self.rack_position_offset = decimal.Decimal(0)
+        if self.rack_position_width is None:
+            self.rack_position_width = self.device_type.rack_position_width
 
         # Inherit default_platform from DeviceType if not set
         if is_new and not self.platform:
