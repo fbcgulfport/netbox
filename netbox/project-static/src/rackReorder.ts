@@ -126,20 +126,22 @@ export function initRackReorder(): void {
   root.dataset.rackReorderInitialized = 'true';
 
   const grids: GridStack[] = [];
-  const options = {
-    cellHeight: 11,
-    margin: 0,
-    marginBottom: 1,
-    float: true,
-    disableOneColumnMode: true,
-    animate: true,
-    removable: false,
-    resizable: { handles: 'e,w' },
-    acceptWidgets: true,
-  };
 
   for (const gridElement of root.querySelectorAll<HTMLElement>('.rack-reorder-grid')) {
-    const grid = GridStack.init(options, gridElement);
+    const minRow = Number(gridElement.getAttribute('gs-min-row') ?? 0);
+    const maxRow = Number(gridElement.getAttribute('gs-max-row') ?? 0);
+    const grid = GridStack.init({
+      cellHeight: 11,
+      margin: 0,
+      marginBottom: 1,
+      float: true,
+      animate: true,
+      removable: false,
+      minRow,
+      maxRow,
+      resizable: { handles: 'e,w' },
+      acceptWidgets: true,
+    }, gridElement);
     grid.on('change dropped removed added', () => markChanged(root));
     grid.on('dropped', () => {
       for (const item of grid.getGridItems()) {

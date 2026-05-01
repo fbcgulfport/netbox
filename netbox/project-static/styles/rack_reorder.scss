@@ -3,6 +3,11 @@
 @import '../node_modules/bootstrap/scss/variables-dark';
 
 .rack-reorder-shell {
+  --rack-cell-height: 11px;
+  --rack-unit-height: calc(var(--rack-cell-height) * 2);
+  --rack-unit-center: calc(var(--rack-unit-height) / 2);
+  --rack-height: calc(var(--rack-rows) * var(--rack-cell-height));
+
   display: grid;
   grid-template-columns: 1fr;
   justify-content: center;
@@ -13,7 +18,9 @@
 }
 
 .rack-reorder-units {
+  position: relative;
   grid-column: 1;
+  height: var(--rack-height);
   padding: 0;
   margin: 2px 0 0;
   color: var(--tblr-secondary-color);
@@ -21,24 +28,28 @@
   list-style: none;
 
   li {
-    height: 22px;
-    line-height: 22px;
-    text-align: center;
+    position: absolute;
+    right: 0.35rem;
+    height: var(--rack-unit-height);
+    line-height: var(--rack-unit-height);
+    text-align: right;
+    transform: translateY(-50%);
   }
 }
 
 .rack-reorder-grid {
   grid-column: 1;
   width: min(100%, 320px);
-  min-height: 200px;
+  height: var(--rack-height);
+  min-height: var(--rack-height);
   margin: 0 auto;
   border: 2px solid var(--tblr-border-color);
   background: repeating-linear-gradient(
     to bottom,
     var(--tblr-bg-surface-secondary) 0,
-    var(--tblr-bg-surface-secondary) 20px,
-    var(--tblr-border-color) 20px,
-    var(--tblr-border-color) 22px
+    var(--tblr-bg-surface-secondary) calc(var(--rack-unit-height) - 2px),
+    var(--tblr-border-color) calc(var(--rack-unit-height) - 2px),
+    var(--tblr-border-color) var(--rack-unit-height)
   );
 
   .has-units & {
