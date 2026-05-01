@@ -1,10 +1,15 @@
+import json
+import decimal
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, PageNotAnInteger
 from django.db import router, transaction
 from django.db.models import Func, IntegerField, Prefetch
 from django.forms import ModelMultipleChoiceField, MultipleHiddenInput, modelformset_factory
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import escape
@@ -1187,6 +1192,142 @@ class RackNonRackedView(generic.ObjectChildrenView):
         return parent.devices.restrict(request.user, 'view').filter(
             rack=parent, position__isnull=True, parent_bay__isnull=True
         )
+
+
+@register_model_view(Rack, 'reorder')
+class RackReorderView(View):
+    queryset = Rack.objects.all()
+    template_name = 'dcim/rack/reorder.html'
+    tab = ViewTab(
+        label=_('Reorder'),
+        weight=520,
+        permission='dcim.change_device',
+    )
+
+    @staticmethod
+    def _grid_y(rack, device):
+        height = device.device_type.u_height
+        if rack.desc_units:
+            return int((device.position - rack.starting_unit) * 2)
+        return int((rack.u_height - device.position + rack.starting_unit - height) * 2)
+
+    @staticmethod
+    def _position_from_grid(rack, y, height):
+        y = decimal.Decimal(str(y)) / 2
+        height = decimal.Decimal(str(height)) / 2
+        if rack.desc_units:
+            return rack.starting_unit + y
+        return rack.u_height + rack.starting_unit - height - y
+
+    @staticmethod
+    def _device_width(device):
+        return device.rack_position_width or device.device_type.rack_position_width or decimal.Decimal(1)
+
+    def _device_item(self, rack, device):
+        width = self._device_width(device)
+        return {
+            'device': device,
+            'x': int((device.rack_position_offset or decimal.Decimal(0)) * 100),
+            'y': self._grid_y(rack, device) if device.position else 0,
+            'w': max(1, int(width * 100)),
+            'h': max(1, int(device.device_type.u_height * 2)),
+        }
+
+    def _get_context(self, request, rack):
+        peer_racks = Rack.objects.restrict(request.user, 'view').filter(site=rack.site)
+        if rack.location:
+            peer_racks = peer_racks.filter(location=rack.location)
+        else:
+            peer_racks = peer_racks.filter(location__isnull=True)
+
+        devices = rack.devices.restrict(request.user, 'view').prefetch_related(
+            'device_type', 'device_type__manufacturer', 'role'
+        ).filter(parent_bay__isnull=True)
+        racked_devices = devices.filter(position__gt=0).order_by('position', 'rack_position_offset', 'pk')
+        non_racked = devices.filter(position__isnull=True).exclude(device_type__subdevice_role='child')
+
+        unit_labels = []
+        for unit in rack.units:
+            unit_labels.append(str(int(unit)) if unit % 1 == 0 else '')
+
+        non_racked_items = []
+        y = 0
+        for device in non_racked.order_by('name', 'pk'):
+            item = self._device_item(rack, device)
+            item['x'] = 0
+            item['y'] = y
+            y += item['h']
+            non_racked_items.append(item)
+
+        return {
+            'object': rack,
+            'peer_racks': peer_racks,
+            'prev_rack': peer_racks.filter(name__lt=rack.name).reverse().first(),
+            'next_rack': peer_racks.filter(name__gt=rack.name).first(),
+            'front_items': [
+                self._device_item(rack, d) for d in racked_devices.filter(face=DeviceFaceChoices.FACE_FRONT)
+            ],
+            'rear_items': [
+                self._device_item(rack, d) for d in racked_devices.filter(face=DeviceFaceChoices.FACE_REAR)
+            ],
+            'non_racked_items': non_racked_items,
+            'unit_labels': unit_labels,
+            'rack_rows': int(rack.u_height * 2),
+            'save_url': request.path,
+            'return_url': rack.get_absolute_url(),
+        }
+
+    def get(self, request, pk):
+        rack = get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+        if not request.user.has_perm(get_permission_for_model(Device, 'change')):
+            return redirect(rack.get_absolute_url())
+        return render(request, self.template_name, self._get_context(request, rack))
+
+    def post(self, request, pk):
+        rack = get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+        permission = get_permission_for_model(Device, 'change')
+        if not request.user.has_perm(permission):
+            return JsonResponse({'error': _('Permission denied.')}, status=403)
+
+        try:
+            data = json.loads(request.body or '{}')
+            devices = data.get('devices', [])
+        except json.JSONDecodeError:
+            return JsonResponse({'error': _('Invalid JSON payload.')}, status=400)
+
+        try:
+            with transaction.atomic():
+                for item in devices:
+                    device = get_object_or_404(rack.devices.restrict(request.user, 'view'), pk=item.get('id'))
+                    if not request.user.has_perm(permission, obj=device):
+                        return JsonResponse({'error': _('Permission denied for device {device}.').format(
+                            device=device
+                        )}, status=403)
+
+                    face = item.get('face')
+                    if face in (DeviceFaceChoices.FACE_FRONT, DeviceFaceChoices.FACE_REAR):
+                        width = decimal.Decimal(str(item.get('width', 1))).quantize(decimal.Decimal('0.01'))
+                        offset = decimal.Decimal(str(item.get('offset', 0))).quantize(decimal.Decimal('0.01'))
+                        height = decimal.Decimal(str(item.get('height', 1)))
+                        device.position = self._position_from_grid(rack, item.get('y', 0), height)
+                        device.face = face
+                        device.rack_position_offset = offset
+                        device.rack_position_width = width
+                    else:
+                        device.position = None
+                        device.face = ''
+                        device.rack_position_offset = decimal.Decimal(0)
+                        device.rack_position_width = device.device_type.rack_position_width
+
+                    device.clean()
+                    device.save()
+        except ValidationError as exc:
+            error = exc.message_dict if hasattr(exc, 'message_dict') else exc.messages
+            return JsonResponse({'error': error}, status=400)
+        except Exception as exc:
+            return JsonResponse({'error': str(exc)}, status=500)
+
+        return JsonResponse({'message': _('Rack reordered successfully.')})
 
 
 @register_model_view(Rack, 'add', detail=False)

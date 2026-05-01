@@ -112,6 +112,7 @@ class DeviceType(ImageAttachmentsMixin, PrimaryModel, WeightMixin):
     rack_position_width = models.DecimalField(
         max_digits=3,
         decimal_places=2,
+        blank=True,
         default=1.0,
         validators=[MinValueValidator(decimal.Decimal('0.01')), MaxValueValidator(decimal.Decimal('1.00'))],
         verbose_name=_('rack row width'),

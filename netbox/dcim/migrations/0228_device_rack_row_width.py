@@ -14,6 +14,7 @@ class Migration(migrations.Migration):
             model_name='devicetype',
             name='rack_position_width',
             field=models.DecimalField(
+                blank=True,
                 decimal_places=2,
                 default=1.0,
                 help_text='Default fraction of a rack row occupied by devices of this type',

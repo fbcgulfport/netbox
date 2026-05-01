@@ -12,6 +12,7 @@ import { initInterfaceTable } from './tables';
 import { initSideNav } from './sidenav';
 import { initDashboard } from './dashboard';
 import { initRackElevation } from './racks';
+import { initRackReorder } from './rackReorder';
 import { initHtmx } from './htmx';
 import { initSavedFilterSelect } from './forms/savedFiltersSelect';
 import { initHotkeys } from './hotkeys';
@@ -32,6 +33,7 @@ function initDocument(): void {
     initSideNav,
     initDashboard,
     initRackElevation,
+    initRackReorder,
     initHtmx,
     initSavedFilterSelect,
     initHotkeys,

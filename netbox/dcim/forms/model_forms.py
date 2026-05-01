@@ -736,6 +736,20 @@ class DeviceForm(TenancyForm, PrimaryModelForm):
         required=False
     )
 
+    fieldsets = (
+        FieldSet('name', 'role', 'status', 'tenant_group', 'tenant', 'description', 'tags', name=_('Device')),
+        FieldSet('device_type', 'platform', 'serial', 'asset_tag', 'airflow', name=_('Hardware')),
+        FieldSet(
+            'site', 'location', 'rack', 'position', 'face', 'rack_position_offset', 'rack_position_width',
+            'latitude', 'longitude', name=_('Location')
+        ),
+        FieldSet('primary_ip4', 'primary_ip6', 'oob_ip', name=_('Management')),
+        FieldSet('cluster', name=_('Virtualization')),
+        FieldSet('virtual_chassis', 'vc_position', 'vc_priority', name=_('Virtual Chassis')),
+        FieldSet('config_template', 'local_context_data', name=_('Configuration')),
+        FieldSet('owner', 'comments', name=_('Additional')),
+    )
+
     class Meta:
         model = Device
         fields = [

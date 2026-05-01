@@ -1,0 +1,49 @@
+{% load i18n %}
+{% load perms %}
+
+<div class="rack-reorder-shell{% if show_units %} has-units{% endif %}">
+  {% if show_units %}
+    <ol class="rack-reorder-units" aria-hidden="true">
+      {% for unit in unit_labels %}
+        <li>{{ unit }}</li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+  <div
+    id="rack-reorder-{{ grid_id }}"
+    class="grid-stack rack-reorder-grid"
+    gs-column="100"
+    gs-max-row="{% if show_units %}{{ rack_rows }}{% else %}300{% endif %}"
+    gs-min-row="{% if show_units %}{{ rack_rows }}{% else %}{{ rack_rows }}{% endif %}"
+    data-face="{{ face }}"
+  >
+    {% for item in items %}
+      <div
+        class="grid-stack-item"
+        gs-id="{{ item.device.pk }}"
+        gs-x="{{ item.x }}"
+        gs-y="{{ item.y }}"
+        gs-w="{{ item.w }}"
+        gs-h="{{ item.h }}"
+        data-device-id="{{ item.device.pk }}"
+        data-face="{{ face }}"
+        data-full-depth="{{ item.device.device_type.is_full_depth|yesno:'true,false' }}"
+        {% if not request.user|can_change:item.device %}gs-locked="true" gs-no-move="true" gs-no-resize="true"{% endif %}
+      >
+        <div
+          class="grid-stack-item-content rack-reorder-device{% if face == 'none' %} non-racked{% endif %}"
+          style="background-color: #{{ item.device.role.color|default:'999999' }};"
+          title="{{ item.device }}"
+        >
+          <span>
+            {% if item.device.name %}{{ item.device.name }}{% else %}{{ item.device.device_type }}{% endif %}
+          </span>
+        </div>
+      </div>
+    {% empty %}
+      {% if not show_units %}
+        <div class="rack-reorder-empty text-secondary p-3 text-center">{% trans "No non-racked devices" %}</div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>

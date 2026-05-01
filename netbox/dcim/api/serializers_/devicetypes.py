@@ -34,6 +34,7 @@ class DeviceTypeSerializer(PrimaryModelSerializer):
         decimal_places=2,
         min_value=decimal.Decimal('0.01'),
         max_value=decimal.Decimal(1),
+        required=False,
         default=decimal.Decimal(1)
     )
     subdevice_role = ChoiceField(choices=SubdeviceRoleChoices, allow_blank=True, required=False, allow_null=True)
