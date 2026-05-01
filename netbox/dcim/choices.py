@@ -1113,6 +1113,22 @@ class InterfaceTypeChoices(ChoiceSet):
     TYPE_INFINIBAND_NDR = 'infiniband-ndr'
     TYPE_INFINIBAND_XDR = 'infiniband-xdr'
 
+    # Audio/Video
+    TYPE_SDI_SD = 'sdi-sd'
+    TYPE_SDI_HD = 'sdi-hd'
+    TYPE_SDI_3G = 'sdi-3g'
+    TYPE_SDI_6G = 'sdi-6g'
+    TYPE_HDMI = 'hdmi'
+    TYPE_XLR = 'xlr'
+    TYPE_DMX_3_PIN = 'dmx-3-pin'
+    TYPE_DMX_5_PIN = 'dmx-5-pin'
+    TYPE_SPEAKON = 'speakon'
+    TYPE_TIMECODE = 'timecode'
+    TYPE_GENLOCK = 'genlock'
+    TYPE_TRS_1_4 = 'trs-1-4'
+    TYPE_TRS_3_5 = 'trs-3-5'
+    TYPE_RS_422 = 'rs-422'
+
     # Serial
     TYPE_T1 = 't1'
     TYPE_E1 = 'e1'
@@ -1440,6 +1456,25 @@ class InterfaceTypeChoices(ChoiceSet):
                 (TYPE_INFINIBAND_HDR, 'HDR (50 Gbps)'),
                 (TYPE_INFINIBAND_NDR, 'NDR (100 Gbps)'),
                 (TYPE_INFINIBAND_XDR, 'XDR (250 Gbps)'),
+            )
+        ),
+        (
+            _('Audio/Video'),
+            (
+                (TYPE_SDI_SD, 'SD-SDI'),
+                (TYPE_SDI_HD, 'HD-SDI'),
+                (TYPE_SDI_3G, '3G-SDI'),
+                (TYPE_SDI_6G, '6G-SDI'),
+                (TYPE_HDMI, 'HDMI'),
+                (TYPE_XLR, 'XLR'),
+                (TYPE_DMX_3_PIN, 'DMX 3-pin'),
+                (TYPE_DMX_5_PIN, 'DMX 5-pin'),
+                (TYPE_SPEAKON, 'Speakon'),
+                (TYPE_TIMECODE, 'Timecode'),
+                (TYPE_GENLOCK, 'Genlock / Reference'),
+                (TYPE_TRS_1_4, '1/4" TRS'),
+                (TYPE_TRS_3_5, '3.5mm TRS'),
+                (TYPE_RS_422, 'RS-422'),
             )
         ),
         (
