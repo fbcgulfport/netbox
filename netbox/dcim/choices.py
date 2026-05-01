@@ -1120,6 +1120,8 @@ class InterfaceTypeChoices(ChoiceSet):
     TYPE_SDI_6G = 'sdi-6g'
     TYPE_HDMI = 'hdmi'
     TYPE_XLR = 'xlr'
+    TYPE_RCA = 'rca'
+    TYPE_PHOENIX = 'phoenix'
     TYPE_DMX_3_PIN = 'dmx-3-pin'
     TYPE_DMX_5_PIN = 'dmx-5-pin'
     TYPE_SPEAKON = 'speakon'
@@ -1128,6 +1130,9 @@ class InterfaceTypeChoices(ChoiceSet):
     TYPE_TRS_1_4 = 'trs-1-4'
     TYPE_TRS_3_5 = 'trs-3-5'
     TYPE_RS_422 = 'rs-422'
+    TYPE_GPIO = 'gpio'
+    TYPE_RF_BNC = 'rf-bnc'
+    TYPE_TALLY = 'tally'
 
     # Serial
     TYPE_T1 = 't1'
@@ -1467,6 +1472,8 @@ class InterfaceTypeChoices(ChoiceSet):
                 (TYPE_SDI_6G, '6G-SDI'),
                 (TYPE_HDMI, 'HDMI'),
                 (TYPE_XLR, 'XLR'),
+                (TYPE_RCA, 'RCA'),
+                (TYPE_PHOENIX, 'Phoenix / Euroblock'),
                 (TYPE_DMX_3_PIN, 'DMX 3-pin'),
                 (TYPE_DMX_5_PIN, 'DMX 5-pin'),
                 (TYPE_SPEAKON, 'Speakon'),
@@ -1475,6 +1482,9 @@ class InterfaceTypeChoices(ChoiceSet):
                 (TYPE_TRS_1_4, '1/4" TRS'),
                 (TYPE_TRS_3_5, '3.5mm TRS'),
                 (TYPE_RS_422, 'RS-422'),
+                (TYPE_GPIO, 'GPIO'),
+                (TYPE_RF_BNC, 'RF over BNC'),
+                (TYPE_TALLY, 'Tally'),
             )
         ),
         (

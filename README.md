@@ -1,6 +1,6 @@
 # FBC Gulfport NetBox Fork
 
-For future Codex/agent work: this fork adds native `dcim.Interface.type` choices for AV/broadcast gear so device type YAML can use first-class interface types instead of `other` for SDI, HDMI, XLR, DMX, Speakon, timecode, genlock/reference, 1/4" and 3.5mm headphone/TRS, and RS-422 endpoints. The core change lives in `netbox/dcim/choices.py` (`InterfaceTypeChoices`) and the generated device type schema lives in `contrib/generated_schema.json`. Keep those in sync when adding or renaming AV interface types.
+For future Codex/agent work: this fork adds native `dcim.Interface.type` choices for AV/broadcast gear so device type YAML can use first-class interface types instead of `other` for SDI, HDMI, XLR, RCA, Phoenix/Euroblock, DMX, Speakon, timecode, genlock/reference, 1/4" and 3.5mm headphone/TRS, RS-422, GPIO, RF-over-BNC, and tally endpoints. The core change lives in `netbox/dcim/choices.py` (`InterfaceTypeChoices`) and the generated device type schema lives in `contrib/generated_schema.json`. Keep those in sync when adding or renaming AV interface types.
 
 Build this fork with the FBC Gulfport Docker fork using `./build.sh main` from `fbcgulfport/netbox-docker`; that Docker fork defaults to `SRC_ORG=fbcgulfport SRC_REPO=netbox`.
 
