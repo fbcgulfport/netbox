@@ -122,7 +122,8 @@ async function save(root: HTMLElement, grids: GridStack[]): Promise<void> {
 
 export function initRackReorder(): void {
   const root = document.querySelector<HTMLElement>('[data-rack-reorder]');
-  if (root === null) return;
+  if (root === null || root.dataset.rackReorderInitialized === 'true') return;
+  root.dataset.rackReorderInitialized = 'true';
 
   const grids: GridStack[] = [];
   const options = {

@@ -2,8 +2,14 @@
 {% load helpers %}
 {% load i18n %}
 {% load perms %}
+{% load static %}
 
 {% block title %}{% trans "Reorder" %} {{ object }}{% endblock %}
+
+{% block head %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static_with_params 'rack_reorder.css' v=settings.RELEASE.version %}" />
+{% endblock head %}
 
 {% block content %}
   <div
@@ -39,3 +45,8 @@
     </div>
   </div>
 {% endblock content %}
+
+{% block javascript %}
+  {{ block.super }}
+  <script src="{% static_with_params 'rack_reorder.js' v=settings.RELEASE.version %}"></script>
+{% endblock javascript %}
