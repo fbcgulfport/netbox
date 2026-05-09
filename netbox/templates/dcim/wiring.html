@@ -5,6 +5,44 @@
 
 {% block title %}{% trans "Wiring Diagram" %} {{ scope_title }}{% endblock %}
 
+{% block head %}
+  {{ block.super }}
+  <style>
+    @media print {
+      @page {
+        size: landscape;
+        margin: 0.25in;
+      }
+
+      body * {
+        visibility: hidden !important;
+      }
+
+      #wiring-diagram,
+      #wiring-diagram * {
+        visibility: visible !important;
+      }
+
+      #wiring-diagram {
+        position: absolute !important;
+        inset: 0 auto auto 0 !important;
+        width: 100% !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: #ffffff !important;
+      }
+
+      #wiring-diagram .wiring-diagram {
+        width: 100% !important;
+        min-width: 0 !important;
+        height: auto !important;
+      }
+    }
+  </style>
+{% endblock head %}
+
 {% block content %}
   <div class="card">
     <h2 class="card-header">
@@ -23,6 +61,15 @@
           <a href="{{ return_url }}" class="btn btn-sm btn-outline-secondary">
             <i class="mdi mdi-arrow-left" aria-hidden="true"></i> {% trans "Back" %}
           </a>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-wiring-print disabled>
+            <i class="mdi mdi-printer" aria-hidden="true"></i> {% trans "Print / Save PDF" %}
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-wiring-open-svg disabled>
+            <i class="mdi mdi-open-in-new" aria-hidden="true"></i> {% trans "Open SVG" %}
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-wiring-download-svg disabled>
+            <i class="mdi mdi-download" aria-hidden="true"></i> {% trans "Download SVG" %}
+          </button>
         </div>
         <div
           id="wiring-diagram"
@@ -50,5 +97,5 @@
 
 {% block javascript %}
   {{ block.super }}
-  <script src="{% static_with_params 'wiring_diagram.js' v='elk-labels-2' %}"></script>
+  <script src="{% static_with_params 'wiring_diagram.js' v='elk-print-1' %}"></script>
 {% endblock javascript %}

@@ -242,6 +242,75 @@ function renderDiagram(container: HTMLElement, data: any, layout: any) {
   container.replaceChildren(svg);
 }
 
+function diagramSvg(container: HTMLElement) {
+  return container.querySelector('svg.wiring-diagram') as SVGElement | null;
+}
+
+function exportFilename(container: HTMLElement) {
+  const scopeTitle = container.dataset.scopeTitle || 'wiring-diagram';
+  const safeTitle = scopeTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${safeTitle || 'wiring-diagram'}.svg`;
+}
+
+function serializeDiagram(container: HTMLElement) {
+  const svg = diagramSvg(container);
+  if (!svg) {
+    return null;
+  }
+
+  const clone = svg.cloneNode(true) as SVGElement;
+  clone.setAttribute('xmlns', SVG_NS);
+  clone.setAttribute('version', '1.1');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
+}
+
+function diagramBlobUrl(container: HTMLElement) {
+  const serialized = serializeDiagram(container);
+  if (!serialized) {
+    return null;
+  }
+  return URL.createObjectURL(new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' }));
+}
+
+function setupExportControls(container: HTMLElement) {
+  const printButton = document.querySelector('[data-wiring-print]') as HTMLButtonElement | null;
+  const openSvgButton = document.querySelector('[data-wiring-open-svg]') as HTMLButtonElement | null;
+  const downloadSvgButton = document.querySelector('[data-wiring-download-svg]') as HTMLButtonElement | null;
+  const controls = [printButton, openSvgButton, downloadSvgButton].filter(Boolean) as HTMLButtonElement[];
+
+  for (const control of controls) {
+    control.disabled = !diagramSvg(container);
+  }
+
+  printButton?.addEventListener('click', () => {
+    window.print();
+  });
+
+  openSvgButton?.addEventListener('click', () => {
+    const url = diagramBlobUrl(container);
+    if (!url) {
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+
+  downloadSvgButton?.addEventListener('click', () => {
+    const url = diagramBlobUrl(container);
+    if (!url) {
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = exportFilename(container);
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+}
+
 async function initWiringDiagram() {
   const container = document.getElementById('wiring-diagram');
   const script = document.getElementById('wiring-diagram-data');
@@ -254,6 +323,7 @@ async function initWiringDiagram() {
   try {
     const layout = await elk.layout(buildElkGraph(data));
     renderDiagram(container, data, layout);
+    setupExportControls(container);
   } catch (error) {
     container.replaceChildren();
     const message = document.createElement('div');
