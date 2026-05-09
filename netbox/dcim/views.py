@@ -1474,36 +1474,78 @@ class WiringDiagramMixin:
             if not a_terms or not b_terms:
                 continue
 
-            source_ports = []
-            target_ports = []
-            source_labels = []
-            target_labels = []
+            cable_label = self._connection_label(cable, a_terms, b_terms)
+            cable_color = f'#{cable.color}' if cable.color else '#a23c3c'
+            cable_url = cable.get_absolute_url()
+            if len(a_terms) == 1 and len(b_terms) == 1:
+                a_term = a_terms[0]
+                b_term = b_terms[0]
+                a_node = self._node_for_termination(a_term, scope)
+                b_node = self._node_for_termination(b_term, scope)
+                nodes.setdefault(a_node['key'], a_node)
+                nodes.setdefault(b_node['key'], b_node)
+                a_port = self._port_for_termination(a_term, a_node['key'])
+                b_port = self._port_for_termination(b_term, b_node['key'])
+                nodes[a_node['key']]['ports'].setdefault(a_port['id'], a_port)
+                nodes[b_node['key']]['ports'].setdefault(b_port['id'], b_port)
+                edges.append({
+                    'id': f'cable:{cable.pk}',
+                    'sources': [a_port['id']],
+                    'targets': [b_port['id']],
+                    'source_label': a_port['label'],
+                    'target_label': b_port['label'],
+                    'label': cable_label,
+                    'color': cable_color,
+                    'url': cable_url,
+                })
+                continue
+
+            cable_node = {
+                'key': f'cable-node:{cable.pk}',
+                'title': cable.label or str(cable),
+                'subtitle': _('Cable junction'),
+                'url': cable_url,
+                'external': False,
+                'rank': 1,
+                'ports': {},
+            }
+            nodes.setdefault(cable_node['key'], cable_node)
+
             for a_term in a_terms:
                 a_node = self._node_for_termination(a_term, scope)
                 nodes.setdefault(a_node['key'], a_node)
                 a_port = self._port_for_termination(a_term, a_node['key'])
+                cable_port = self._cable_port_for_termination(cable, a_term, cable_node['key'], 'A')
                 nodes[a_node['key']]['ports'].setdefault(a_port['id'], a_port)
-                source_ports.append(a_port['id'])
-                source_labels.append(a_port['label'])
+                nodes[cable_node['key']]['ports'].setdefault(cable_port['id'], cable_port)
+                edges.append({
+                    'id': f'cable:{cable.pk}:A:{a_term._meta.label_lower}:{a_term.pk}',
+                    'sources': [a_port['id']],
+                    'targets': [cable_port['id']],
+                    'source_label': a_port['label'],
+                    'target_label': cable_port['label'],
+                    'label': cable_label,
+                    'color': cable_color,
+                    'url': cable_url,
+                })
 
             for b_term in b_terms:
                 b_node = self._node_for_termination(b_term, scope)
                 nodes.setdefault(b_node['key'], b_node)
                 b_port = self._port_for_termination(b_term, b_node['key'])
+                cable_port = self._cable_port_for_termination(cable, b_term, cable_node['key'], 'B')
                 nodes[b_node['key']]['ports'].setdefault(b_port['id'], b_port)
-                target_ports.append(b_port['id'])
-                target_labels.append(b_port['label'])
-
-            edges.append({
-                'id': f'cable:{cable.pk}',
-                'sources': source_ports,
-                'targets': target_ports,
-                'source_label': ', '.join(source_labels),
-                'target_label': ', '.join(target_labels),
-                'label': self._connection_label(cable, a_terms, b_terms),
-                'color': f'#{cable.color}' if cable.color else '#a23c3c',
-                'url': cable.get_absolute_url(),
-            })
+                nodes[cable_node['key']]['ports'].setdefault(cable_port['id'], cable_port)
+                edges.append({
+                    'id': f'cable:{cable.pk}:B:{b_term._meta.label_lower}:{b_term.pk}',
+                    'sources': [cable_port['id']],
+                    'targets': [b_port['id']],
+                    'source_label': cable_port['label'],
+                    'target_label': b_port['label'],
+                    'label': cable_label,
+                    'color': cable_color,
+                    'url': cable_url,
+                })
 
         for node in nodes.values():
             ports = sorted(node['ports'].values(), key=lambda p: p['label'])
@@ -1522,6 +1564,13 @@ class WiringDiagramMixin:
             'id': f'{node_key}:port:{termination._meta.label_lower}:{termination.pk}',
             'label': self._component_label(termination),
             'url': termination.get_absolute_url() if hasattr(termination, 'get_absolute_url') else '',
+        }
+
+    def _cable_port_for_termination(self, cable, termination, node_key, cable_end):
+        return {
+            'id': f'{node_key}:port:{cable_end}:{termination._meta.label_lower}:{termination.pk}',
+            'label': f'{cable_end}: {self._component_label(termination)}',
+            'url': cable.get_absolute_url(),
         }
 
     def get(self, request, pk):
