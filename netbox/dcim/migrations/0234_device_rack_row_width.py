@@ -6,7 +6,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('dcim', '0227_alter_interface_speed_bigint'),
+        ('dcim', '0233_device_render_config_permission'),
     ]
 
     operations = [
