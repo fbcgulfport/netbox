@@ -1330,6 +1330,232 @@ class RackReorderView(View):
         return JsonResponse({'message': _('Rack reordered successfully.')})
 
 
+@register_model_view(Rack, 'wiring')
+class RackWiringDiagramView(View):
+    queryset = Rack.objects.all()
+    template_name = 'dcim/rack/wiring.html'
+    tab = ViewTab(
+        label=_('Wiring'),
+        weight=530,
+        permission='dcim.view_cable',
+    )
+
+    rank_keywords = (
+        (0, ('microphone', 'mic', 'input', 'source', 'wall box', 'wallbox')),
+        (1, ('patch', 'panel', 'stagebox', 'wall plate', 'wallplate', 'snake')),
+        (2, ('processor', 'dsp', 'mixer', 'matrix', 'switch', 'router', 'amp', 'amplifier', 'output')),
+    )
+
+    def _node_for_termination(self, termination, rack):
+        if device := getattr(termination, 'device', None):
+            role = str(device.role) if device.role else ''
+            title = device.name
+            subtitle = role or str(device.device_type)
+            external = device.rack_id != rack.pk
+            text = ' '.join((title, subtitle, str(device.device_type))).lower()
+            rank = self._rank_for_text(text, external)
+            return {
+                'key': f'device:{device.pk}',
+                'title': title,
+                'subtitle': subtitle,
+                'url': device.get_absolute_url(),
+                'external': external,
+                'rank': rank,
+                'components': [],
+            }
+
+        if powerfeed := getattr(termination, 'power_panel', None):
+            title = str(termination)
+            subtitle = str(powerfeed)
+            return {
+                'key': f'powerfeed:{termination.pk}',
+                'title': title,
+                'subtitle': subtitle,
+                'url': termination.get_absolute_url(),
+                'external': getattr(termination, 'rack_id', None) != rack.pk,
+                'rank': 3,
+                'components': [],
+            }
+
+        if circuit := getattr(termination, 'circuit', None):
+            return {
+                'key': f'circuittermination:{termination.pk}',
+                'title': str(circuit),
+                'subtitle': str(circuit.provider),
+                'url': termination.get_absolute_url(),
+                'external': True,
+                'rank': 0,
+                'components': [],
+            }
+
+        return {
+            'key': f'{termination._meta.label_lower}:{termination.pk}',
+            'title': str(termination),
+            'subtitle': str(termination._meta.verbose_name),
+            'url': termination.get_absolute_url() if hasattr(termination, 'get_absolute_url') else '',
+            'external': True,
+            'rank': 0,
+            'components': [],
+        }
+
+    def _rank_for_text(self, text, external=False):
+        if external:
+            return 0
+        for rank, keywords in self.rank_keywords:
+            if any(keyword in text for keyword in keywords):
+                return rank
+        return 1
+
+    @staticmethod
+    def _component_label(termination):
+        label = termination.label or termination.name if hasattr(termination, 'label') else str(termination)
+        if label:
+            return label
+        return str(termination)
+
+    @staticmethod
+    def _connection_label(cable, a_terms, b_terms):
+        parts = []
+        if cable.label:
+            parts.append(cable.label)
+        if cable.color:
+            parts.append(f'#{cable.color}')
+        if cable.type:
+            parts.append(cable.get_type_display())
+        if len(a_terms) > 1 or len(b_terms) > 1:
+            parts.append(f'{len(a_terms)}x{len(b_terms)}')
+        return ' | '.join(parts)
+
+    def _build_diagram(self, request, rack):
+        rack_term_ids = set(
+            CableTermination.objects.restrict(request.user, 'view')
+            .filter(_rack=rack)
+            .values_list('cable_id', flat=True)
+        )
+        cables = (
+            Cable.objects.restrict(request.user, 'view')
+            .filter(pk__in=rack_term_ids)
+            .prefetch_related('terminations__termination', 'terminations__termination_type')
+            .order_by('label', 'pk')
+        )
+
+        nodes = {}
+        links = []
+        for cable in cables:
+            a_terms = []
+            b_terms = []
+            for cable_termination in cable.terminations.all():
+                if cable_termination.cable_end == 'A':
+                    a_terms.append(cable_termination.termination)
+                else:
+                    b_terms.append(cable_termination.termination)
+
+            if not a_terms or not b_terms:
+                continue
+
+            for a_term in a_terms:
+                for b_term in b_terms:
+                    a_node = self._node_for_termination(a_term, rack)
+                    b_node = self._node_for_termination(b_term, rack)
+                    nodes.setdefault(a_node['key'], a_node)
+                    nodes.setdefault(b_node['key'], b_node)
+                    nodes[a_node['key']]['components'].append(self._component_label(a_term))
+                    nodes[b_node['key']]['components'].append(self._component_label(b_term))
+                    links.append({
+                        'source': a_node['key'],
+                        'target': b_node['key'],
+                        'source_label': self._component_label(a_term),
+                        'target_label': self._component_label(b_term),
+                        'label': self._connection_label(cable, a_terms, b_terms),
+                        'color': f'#{cable.color}' if cable.color else '#a23c3c',
+                        'url': cable.get_absolute_url(),
+                    })
+
+        for node in nodes.values():
+            node['components'] = sorted(set(node['components']))[:8]
+
+        columns = {}
+        for node in nodes.values():
+            columns.setdefault(node['rank'], []).append(node)
+        if not columns:
+            return {
+                'nodes': [],
+                'links': [],
+                'width': 960,
+                'height': 360,
+                'columns': [],
+            }
+
+        ordered_ranks = sorted(columns)
+        column_width = 280
+        row_height = 118
+        margin_x = 36
+        margin_y = 58
+        node_width = 210
+        node_height = 78
+
+        ordered_columns = []
+        for column_index, rank in enumerate(ordered_ranks):
+            column_nodes = sorted(columns[rank], key=lambda n: (n['external'], n['title']))
+            x = margin_x + column_index * column_width
+            ordered_columns.append({'rank': rank, 'x': x, 'nodes': column_nodes})
+            for row_index, node in enumerate(column_nodes):
+                node['x'] = x
+                node['y'] = margin_y + row_index * row_height
+                node['width'] = node_width
+                node['height'] = node_height
+                node['source_x'] = x + node_width
+                node['source_y'] = node['y'] + node_height / 2
+                node['target_x'] = x
+                node['target_y'] = node['y'] + node_height / 2
+                node['component_lines'] = [
+                    {
+                        'label': component,
+                        'y': node['y'] + 52 + component_index * 12,
+                    }
+                    for component_index, component in enumerate(node['components'][:3])
+                ]
+
+        width = margin_x * 2 + (len(ordered_ranks) - 1) * column_width + node_width
+        height = max(
+            360,
+            margin_y * 2 + max(len(column['nodes']) for column in ordered_columns) * row_height
+        )
+
+        for index, link in enumerate(links):
+            source = nodes[link['source']]
+            target = nodes[link['target']]
+            if source['x'] <= target['x']:
+                start_x, start_y = source['source_x'], source['source_y']
+                end_x, end_y = target['target_x'], target['target_y']
+            else:
+                start_x, start_y = source['target_x'], source['target_y']
+                end_x, end_y = target['source_x'], target['source_y']
+            midpoint = (start_x + end_x) / 2
+            if abs(end_x - start_x) < node_width:
+                midpoint = max(start_x, end_x) + 36 + (index % 4) * 12
+            link['path'] = f'M {start_x} {start_y} H {midpoint} V {end_y} H {end_x}'
+            link['label_x'] = midpoint + 4
+            link['label_y'] = (start_y + end_y) / 2 - 4
+
+        return {
+            'nodes': sorted(nodes.values(), key=lambda n: (n['rank'], n['title'])),
+            'links': links,
+            'width': width,
+            'height': height,
+            'columns': ordered_columns,
+        }
+
+    def get(self, request, pk):
+        rack = get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+        if not request.user.has_perm(get_permission_for_model(Cable, 'view')):
+            return redirect(rack.get_absolute_url())
+        return render(request, self.template_name, {
+            'object': rack,
+            'diagram': self._build_diagram(request, rack),
+        })
+
+
 @register_model_view(Rack, 'add', detail=False)
 @register_model_view(Rack, 'edit')
 class RackEditView(generic.ObjectEditView):
