@@ -1,22 +1,26 @@
-{% extends 'dcim/rack/base.html' %}
+{% extends base_template %}
 {% load helpers %}
 {% load i18n %}
 
-{% block title %}{% trans "Wiring Diagram" %} {{ object }}{% endblock %}
+{% block title %}{% trans "Wiring Diagram" %} {{ scope_title }}{% endblock %}
 
 {% block content %}
   <div class="card">
     <h2 class="card-header">
-      {% trans "Wiring Diagram" %}
+      {% blocktrans trimmed with scope=scope_title %}Wiring Diagram: {{ scope }}{% endblocktrans %}
     </h2>
     <div class="card-body">
+      <div class="text-secondary mb-3">{{ scope_subtitle }}</div>
       {% if diagram.links %}
         <div class="wiring-diagram-toolbar mb-3">
-          <a href="{% url 'dcim:cable_list' %}?rack_id={{ object.pk }}" class="btn btn-sm btn-primary">
+          <a href="{% url 'dcim:cable_list' %}{{ scope_filter_url }}" class="btn btn-sm btn-primary">
             <i class="mdi mdi-cable-data" aria-hidden="true"></i> {% trans "Cables" %}
           </a>
-          <a href="{{ object.get_absolute_url }}" class="btn btn-sm btn-outline-secondary">
-            <i class="mdi mdi-server" aria-hidden="true"></i> {% trans "Rack" %}
+          <a href="{% url 'dcim:wiring_diagram' %}" class="btn btn-sm btn-outline-primary">
+            <i class="mdi mdi-vector-combine" aria-hidden="true"></i> {% trans "All Wiring" %}
+          </a>
+          <a href="{{ return_url }}" class="btn btn-sm btn-outline-secondary">
+            <i class="mdi mdi-arrow-left" aria-hidden="true"></i> {% trans "Back" %}
           </a>
         </div>
         <div class="wiring-diagram-wrap" style="overflow: auto; border: 1px solid var(--tblr-border-color); border-radius: 4px; background: var(--tblr-bg-surface);">
@@ -27,16 +31,13 @@
             role="img"
             aria-labelledby="wiring-title wiring-desc"
           >
-            <title id="wiring-title">{% trans "Wiring diagram for" %} {{ object }}</title>
+            <title id="wiring-title">{% trans "Wiring diagram for" %} {{ scope_title }}</title>
             <desc id="wiring-desc">{% trans "Automatically generated from NetBox cable terminations." %}</desc>
 
             <defs>
               <filter id="wiring-shadow" x="-10%" y="-10%" width="120%" height="130%">
                 <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#1f2937" flood-opacity="0.18" />
               </filter>
-              <marker id="wiring-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#7a2d2d" />
-              </marker>
             </defs>
 
             <style>
@@ -83,7 +84,6 @@
               .wiring-link {
                 fill: none;
                 stroke-width: 1.6;
-                marker-end: url(#wiring-arrow);
               }
               .wiring-link-hit {
                 fill: none;
@@ -120,18 +120,8 @@
             <rect class="wiring-page" x="0" y="0" width="{{ diagram.width }}" height="{{ diagram.height }}" />
 
             {% for column in diagram.columns %}
-              <rect class="wiring-band" x="{{ column.x|add:'-14' }}" y="26" width="238" height="{{ diagram.height|add:'-96' }}" rx="2" />
-              <text class="wiring-band-label" x="{{ column.x }}" y="46">
-                {% if column.rank == 0 %}
-                  {% trans "Sources / External" %}
-                {% elif column.rank == 1 %}
-                  {% trans "Patch / Rack" %}
-                {% elif column.rank == 2 %}
-                  {% trans "Processing / Outputs" %}
-                {% else %}
-                  {% trans "Other" %}
-                {% endif %}
-              </text>
+              <rect class="wiring-band" x="{{ column.band_x }}" y="34" width="276" height="{{ column.band_height }}" rx="2" />
+              <text class="wiring-band-label" x="{{ column.x }}" y="54">{{ column.label }}</text>
             {% endfor %}
 
             {% for link in diagram.links %}
@@ -141,17 +131,17 @@
                 {% if link.label %}
                   <text class="wiring-link-label" x="{{ link.label_x }}" y="{{ link.label_y }}">{{ link.label }}</text>
                 {% endif %}
-                <text class="wiring-port-label" x="{{ link.label_x }}" y="{{ link.label_y|add:'12' }}">{{ link.source_label }} -> {{ link.target_label }}</text>
+                <text class="wiring-port-label" x="{{ link.label_x }}" y="{{ link.port_label_y }}">{{ link.source_label }} -> {{ link.target_label }}</text>
               </a>
             {% endfor %}
 
             {% for node in diagram.nodes %}
               <a href="{{ node.url }}">
                 <rect class="wiring-node{% if node.external %} external{% endif %}" x="{{ node.x }}" y="{{ node.y }}" width="{{ node.width }}" height="{{ node.height }}" rx="4" />
-                <text class="wiring-node-title" x="{{ node.x|add:'12' }}" y="{{ node.y|add:'20' }}">{{ node.title|truncatechars:28 }}</text>
-                <text class="wiring-node-subtitle" x="{{ node.x|add:'12' }}" y="{{ node.y|add:'36' }}">{{ node.subtitle|truncatechars:32 }}</text>
+                <text class="wiring-node-title" x="{{ node.text_x }}" y="{{ node.title_y }}">{{ node.title|truncatechars:30 }}</text>
+                <text class="wiring-node-subtitle" x="{{ node.text_x }}" y="{{ node.subtitle_y }}">{{ node.subtitle|truncatechars:34 }}</text>
                 {% for component in node.component_lines %}
-                  <text class="wiring-node-component" x="{{ node.x|add:'12' }}" y="{{ component.y }}">
+                  <text class="wiring-node-component" x="{{ node.text_x }}" y="{{ component.y }}">
                     {{ component.label|truncatechars:34 }}
                   </text>
                 {% endfor %}
@@ -159,7 +149,7 @@
             {% endfor %}
 
             <rect class="wiring-title-block" x="36" y="{{ diagram.height|add:'-56' }}" width="360" height="34" />
-            <text class="wiring-title-text" x="48" y="{{ diagram.height|add:'-35' }}">{{ object }}</text>
+            <text class="wiring-title-text" x="48" y="{{ diagram.height|add:'-35' }}">{{ scope_title }}</text>
             <text class="wiring-note" x="176" y="{{ diagram.height|add:'-35' }}">{% trans "Generated from NetBox cable terminations" %}</text>
           </svg>
         </div>
@@ -170,7 +160,7 @@
           </div>
           <p class="empty-title">{% trans "No cabled terminations found" %}</p>
           <p class="empty-subtitle text-secondary">
-            {% trans "Cable interfaces, ports, or feeds in this rack to generate a wiring diagram automatically." %}
+            {% trans "Cable interfaces, ports, or feeds in this scope to generate a wiring diagram automatically." %}
           </p>
         </div>
       {% endif %}

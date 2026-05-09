@@ -31,6 +31,7 @@ urlpatterns = [
     path('racks/', include(get_model_urls('dcim', 'rack', detail=False))),
     path('racks/<int:pk>/', include(get_model_urls('dcim', 'rack'))),
     path('rack-elevations/', views.RackElevationListView.as_view(), name='rack_elevation_list'),
+    path('wiring-diagrams/', views.GlobalWiringDiagramView.as_view(), name='wiring_diagram'),
 
     path('rack-types/', include(get_model_urls('dcim', 'racktype', detail=False))),
     path('rack-types/<int:pk>/', include(get_model_urls('dcim', 'racktype'))),

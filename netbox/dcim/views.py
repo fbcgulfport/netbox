@@ -1330,28 +1330,45 @@ class RackReorderView(View):
         return JsonResponse({'message': _('Rack reordered successfully.')})
 
 
-@register_model_view(Rack, 'wiring')
-class RackWiringDiagramView(View):
-    queryset = Rack.objects.all()
-    template_name = 'dcim/rack/wiring.html'
-    tab = ViewTab(
-        label=_('Wiring'),
-        weight=530,
-        permission='dcim.view_cable',
-    )
-
+class WiringDiagramMixin:
+    template_name = 'dcim/wiring.html'
+    base_template = 'generic/object.html'
+    scope_kind = 'object'
+    scope_filter_url = ''
+    scope_subtitle = _('Generated from NetBox cable terminations.')
     rank_keywords = (
         (0, ('microphone', 'mic', 'input', 'source', 'wall box', 'wallbox')),
         (1, ('patch', 'panel', 'stagebox', 'wall plate', 'wallplate', 'snake')),
         (2, ('processor', 'dsp', 'mixer', 'matrix', 'switch', 'router', 'amp', 'amplifier', 'output')),
     )
+    rank_labels = {
+        0: _('Sources / External'),
+        1: _('Patch / Distribution'),
+        2: _('Processing / Outputs'),
+        3: _('Power / Other'),
+    }
 
-    def _node_for_termination(self, termination, rack):
+    def get_scope(self, request, pk=None):
+        return None
+
+    def get_scope_title(self, scope):
+        return str(scope) if scope is not None else _('All Wiring')
+
+    def get_return_url(self, scope):
+        return scope.get_absolute_url() if scope is not None else reverse('dcim:cable_list')
+
+    def get_cables(self, request, scope):
+        return Cable.objects.restrict(request.user, 'view').none()
+
+    def is_external(self, termination, scope):
+        return False
+
+    def _node_for_termination(self, termination, scope):
         if device := getattr(termination, 'device', None):
             role = str(device.role) if device.role else ''
             title = device.name
             subtitle = role or str(device.device_type)
-            external = device.rack_id != rack.pk
+            external = self.is_external(termination, scope)
             text = ' '.join((title, subtitle, str(device.device_type))).lower()
             rank = self._rank_for_text(text, external)
             return {
@@ -1367,12 +1384,13 @@ class RackWiringDiagramView(View):
         if powerfeed := getattr(termination, 'power_panel', None):
             title = str(termination)
             subtitle = str(powerfeed)
+            external = self.is_external(termination, scope)
             return {
                 'key': f'powerfeed:{termination.pk}',
                 'title': title,
                 'subtitle': subtitle,
                 'url': termination.get_absolute_url(),
-                'external': getattr(termination, 'rack_id', None) != rack.pk,
+                'external': external,
                 'rank': 3,
                 'components': [],
             }
@@ -1408,7 +1426,7 @@ class RackWiringDiagramView(View):
 
     @staticmethod
     def _component_label(termination):
-        label = termination.label or termination.name if hasattr(termination, 'label') else str(termination)
+        label = getattr(termination, 'label', None) or getattr(termination, 'name', None)
         if label:
             return label
         return str(termination)
@@ -1426,19 +1444,22 @@ class RackWiringDiagramView(View):
             parts.append(f'{len(a_terms)}x{len(b_terms)}')
         return ' | '.join(parts)
 
-    def _build_diagram(self, request, rack):
-        rack_term_ids = set(
+    @staticmethod
+    def _scoped_cables(request, **filters):
+        cable_ids = set(
             CableTermination.objects.restrict(request.user, 'view')
-            .filter(_rack=rack)
+            .filter(**filters)
             .values_list('cable_id', flat=True)
         )
-        cables = (
+        return (
             Cable.objects.restrict(request.user, 'view')
-            .filter(pk__in=rack_term_ids)
+            .filter(pk__in=cable_ids)
             .prefetch_related('terminations__termination', 'terminations__termination_type')
             .order_by('label', 'pk')
         )
 
+    def _build_diagram(self, request, scope):
+        cables = self.get_cables(request, scope)
         nodes = {}
         links = []
         for cable in cables:
@@ -1455,8 +1476,8 @@ class RackWiringDiagramView(View):
 
             for a_term in a_terms:
                 for b_term in b_terms:
-                    a_node = self._node_for_termination(a_term, rack)
-                    b_node = self._node_for_termination(b_term, rack)
+                    a_node = self._node_for_termination(a_term, scope)
+                    b_node = self._node_for_termination(b_term, scope)
                     nodes.setdefault(a_node['key'], a_node)
                     nodes.setdefault(b_node['key'], b_node)
                     nodes[a_node['key']]['components'].append(self._component_label(a_term))
@@ -1487,18 +1508,24 @@ class RackWiringDiagramView(View):
             }
 
         ordered_ranks = sorted(columns)
-        column_width = 280
-        row_height = 118
-        margin_x = 36
-        margin_y = 58
-        node_width = 210
-        node_height = 78
+        column_width = 320
+        row_height = 126
+        margin_x = 42
+        margin_y = 72
+        node_width = 238
+        node_height = 84
 
         ordered_columns = []
         for column_index, rank in enumerate(ordered_ranks):
             column_nodes = sorted(columns[rank], key=lambda n: (n['external'], n['title']))
             x = margin_x + column_index * column_width
-            ordered_columns.append({'rank': rank, 'x': x, 'nodes': column_nodes})
+            ordered_columns.append({
+                'rank': rank,
+                'label': self.rank_labels.get(rank, _('Other')),
+                'x': x,
+                'band_x': x - 18,
+                'nodes': column_nodes,
+            })
             for row_index, node in enumerate(column_nodes):
                 node['x'] = x
                 node['y'] = margin_y + row_index * row_height
@@ -1508,10 +1535,13 @@ class RackWiringDiagramView(View):
                 node['source_y'] = node['y'] + node_height / 2
                 node['target_x'] = x
                 node['target_y'] = node['y'] + node_height / 2
+                node['text_x'] = node['x'] + 12
+                node['title_y'] = node['y'] + 21
+                node['subtitle_y'] = node['y'] + 38
                 node['component_lines'] = [
                     {
                         'label': component,
-                        'y': node['y'] + 52 + component_index * 12,
+                        'y': node['y'] + 56 + component_index * 12,
                     }
                     for component_index, component in enumerate(node['components'][:3])
                 ]
@@ -1533,10 +1563,16 @@ class RackWiringDiagramView(View):
                 end_x, end_y = target['source_x'], target['source_y']
             midpoint = (start_x + end_x) / 2
             if abs(end_x - start_x) < node_width:
-                midpoint = max(start_x, end_x) + 36 + (index % 4) * 12
+                midpoint = max(start_x, end_x) + 44 + (index % 5) * 14
+            else:
+                midpoint += ((index % 5) - 2) * 8
             link['path'] = f'M {start_x} {start_y} H {midpoint} V {end_y} H {end_x}'
             link['label_x'] = midpoint + 4
             link['label_y'] = (start_y + end_y) / 2 - 4
+            link['port_label_y'] = link['label_y'] + 12
+
+        for column in ordered_columns:
+            column['band_height'] = height - 104
 
         return {
             'nodes': sorted(nodes.values(), key=lambda n: (n['rank'], n['title'])),
@@ -1547,12 +1583,133 @@ class RackWiringDiagramView(View):
         }
 
     def get(self, request, pk):
-        rack = get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+        scope = self.get_scope(request, pk)
         if not request.user.has_perm(get_permission_for_model(Cable, 'view')):
-            return redirect(rack.get_absolute_url())
+            return redirect(self.get_return_url(scope))
         return render(request, self.template_name, {
-            'object': rack,
-            'diagram': self._build_diagram(request, rack),
+            'object': scope,
+            'base_template': self.base_template,
+            'diagram': self._build_diagram(request, scope),
+            'scope_kind': self.scope_kind,
+            'scope_title': self.get_scope_title(scope),
+            'scope_subtitle': self.scope_subtitle,
+            'return_url': self.get_return_url(scope),
+            'scope_filter_url': self.scope_filter_url,
+        })
+
+
+@register_model_view(Rack, 'wiring')
+class RackWiringDiagramView(WiringDiagramMixin, View):
+    queryset = Rack.objects.all()
+    base_template = 'dcim/rack/base.html'
+    scope_kind = 'rack'
+    tab = ViewTab(
+        label=_('Wiring'),
+        weight=530,
+        permission='dcim.view_cable',
+    )
+
+    def get_scope(self, request, pk=None):
+        return get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+
+    def get(self, request, pk):
+        self.scope_filter_url = f'?rack_id={pk}'
+        return super().get(request, pk)
+
+    def get_cables(self, request, scope):
+        return self._scoped_cables(request, _rack=scope)
+
+    def is_external(self, termination, scope):
+        if device := getattr(termination, 'device', None):
+            return device.rack_id != scope.pk
+        return getattr(termination, 'rack_id', None) != scope.pk
+
+
+@register_model_view(Site, 'wiring')
+class SiteWiringDiagramView(WiringDiagramMixin, View):
+    queryset = Site.objects.all()
+    base_template = 'dcim/site.html'
+    scope_kind = 'site'
+    tab = ViewTab(
+        label=_('Wiring'),
+        weight=530,
+        permission='dcim.view_cable',
+    )
+
+    def get_scope(self, request, pk=None):
+        return get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+
+    def get(self, request, pk):
+        self.scope_filter_url = f'?site_id={pk}'
+        return super().get(request, pk)
+
+    def get_cables(self, request, scope):
+        return self._scoped_cables(request, _site=scope)
+
+    def is_external(self, termination, scope):
+        if device := getattr(termination, 'device', None):
+            return device.site_id != scope.pk
+        return getattr(termination, 'site_id', None) != scope.pk
+
+
+@register_model_view(DeviceRole, 'wiring')
+class DeviceRoleWiringDiagramView(WiringDiagramMixin, View):
+    queryset = DeviceRole.objects.all()
+    base_template = 'dcim/devicerole.html'
+    scope_kind = 'role'
+    tab = ViewTab(
+        label=_('Wiring'),
+        weight=530,
+        permission='dcim.view_cable',
+    )
+
+    def get_scope(self, request, pk=None):
+        return get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+
+    def _role_ids(self, role):
+        if not hasattr(self, '_role_id_cache'):
+            if hasattr(role, 'get_descendants'):
+                self._role_id_cache = set(role.get_descendants(include_self=True).values_list('pk', flat=True))
+            else:
+                self._role_id_cache = {role.pk}
+        return self._role_id_cache
+
+    def get_cables(self, request, scope):
+        return self._scoped_cables(request, _device__role_id__in=self._role_ids(scope))
+
+    def is_external(self, termination, scope):
+        if device := getattr(termination, 'device', None):
+            return device.role_id not in self._role_ids(scope)
+        return True
+
+
+class GlobalWiringDiagramView(WiringDiagramMixin, View):
+    base_template = 'base/layout.html'
+    scope_kind = 'global'
+    scope_subtitle = _('Every cable visible to you in one generated wiring diagram.')
+
+    def get_cables(self, request, scope):
+        return (
+            Cable.objects.restrict(request.user, 'view')
+            .prefetch_related('terminations__termination', 'terminations__termination_type')
+            .order_by('label', 'pk')
+        )
+
+    def get_return_url(self, scope):
+        return reverse('dcim:cable_list')
+
+    def get(self, request):
+        if not request.user.has_perm(get_permission_for_model(Cable, 'view')):
+            return redirect(reverse('dcim:cable_list'))
+        return render(request, self.template_name, {
+            'object': None,
+            'base_template': self.base_template,
+            'diagram': self._build_diagram(request, None),
+            'scope_kind': self.scope_kind,
+            'scope_title': self.get_scope_title(None),
+            'scope_subtitle': self.scope_subtitle,
+            'return_url': self.get_return_url(None),
+            'scope_filter_url': '',
         })
 
 
