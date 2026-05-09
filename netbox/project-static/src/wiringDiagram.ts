@@ -2,6 +2,9 @@
 import ELK from 'elkjs/lib/elk.bundled.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const EDGE_LABEL_HEIGHT = 14;
+const EDGE_LABEL_MARGIN = 5;
+const EDGE_LABEL_NODE_CLEARANCE = 8;
 
 function svgElement(name: string, attributes: Record<string, string | number> = {}) {
   const element = document.createElementNS(SVG_NS, name);
@@ -23,15 +26,112 @@ function edgePath(section: any) {
   return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
 }
 
-function midpoint(section: any) {
-  const points = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
-  const index = Math.floor((points.length - 1) / 2);
-  const start = points[index];
-  const end = points[index + 1] || start;
+function sectionPoints(section: any) {
+  return [section.startPoint, ...(section.bendPoints || []), section.endPoint].filter(Boolean);
+}
+
+function labelWidth(value: string) {
+  return Math.min(260, Math.max(60, value.length * 6));
+}
+
+function boxesIntersect(a: any, b: any) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function expandBox(box: any, padding: number) {
   return {
-    x: (start.x + end.x) / 2,
-    y: (start.y + end.y) / 2,
+    x: box.x - padding,
+    y: box.y - padding,
+    width: box.width + padding * 2,
+    height: box.height + padding * 2,
   };
+}
+
+function nodeObstacles(layout: any) {
+  return (layout.children || []).map((node: any) =>
+    expandBox(
+      {
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+      },
+      EDGE_LABEL_NODE_CLEARANCE,
+    ),
+  );
+}
+
+function labelBox(point: any, width: number) {
+  return {
+    x: point.x - width / 2 - EDGE_LABEL_MARGIN,
+    y: point.y - EDGE_LABEL_HEIGHT / 2 - EDGE_LABEL_MARGIN,
+    width: width + EDGE_LABEL_MARGIN * 2,
+    height: EDGE_LABEL_HEIGHT + EDGE_LABEL_MARGIN * 2,
+  };
+}
+
+function segmentCandidates(section: any, width: number) {
+  const candidates = [];
+  const points = sectionPoints(section);
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    const length = Math.hypot(end.x - start.x, end.y - start.y);
+    if (length < Math.max(width * 0.75, 54)) {
+      continue;
+    }
+    for (const ratio of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+      candidates.push({
+        point: {
+          x: start.x + (end.x - start.x) * ratio,
+          y: start.y + (end.y - start.y) * ratio,
+        },
+        length,
+        centerBias: Math.abs(ratio - 0.5),
+      });
+    }
+  }
+  return candidates;
+}
+
+function chooseLabelPoint(edge: any, text: string, nodeBoxes: any[], usedLabelBoxes: any[]) {
+  const width = labelWidth(text);
+  const elkLabel = edge.labels?.[0];
+  const preferredPoint =
+    elkLabel && Number.isFinite(elkLabel.x)
+      ? { x: elkLabel.x + (elkLabel.width || width) / 2, y: elkLabel.y + (elkLabel.height || EDGE_LABEL_HEIGHT) / 2 }
+      : null;
+  const candidates = (edge.sections || []).flatMap((section: any) => segmentCandidates(section, width));
+
+  if (preferredPoint) {
+    candidates.push({ point: preferredPoint, length: 0, centerBias: 0.1, preferred: true });
+  }
+
+  const ranked = candidates
+    .map((candidate: any) => ({
+      ...candidate,
+      box: labelBox(candidate.point, width),
+      score:
+        (preferredPoint ? Math.hypot(candidate.point.x - preferredPoint.x, candidate.point.y - preferredPoint.y) : 0) +
+        candidate.centerBias * 80 -
+        candidate.length * 0.08 +
+        (candidate.preferred ? -40 : 0),
+    }))
+    .sort((a: any, b: any) => a.score - b.score);
+
+  const clearCandidate = ranked.find(
+    (candidate: any) =>
+      !nodeBoxes.some((box: any) => boxesIntersect(candidate.box, box)) &&
+      !usedLabelBoxes.some((box: any) => boxesIntersect(candidate.box, box)),
+  );
+  const nodeClearCandidate = ranked.find((candidate: any) => !nodeBoxes.some((box: any) => boxesIntersect(candidate.box, box)));
+  const candidate = clearCandidate || nodeClearCandidate;
+
+  if (!candidate) {
+    return null;
+  }
+  usedLabelBoxes.push(candidate.box);
+  return { ...candidate.point, width };
 }
 
 function portSides(data: any) {
@@ -178,22 +278,33 @@ function renderEdge(svg: SVGElement, edge: any, source: any) {
   }
 }
 
-function renderEdgeLabel(svg: SVGElement, edge: any, source: any) {
+function renderEdgeLabel(svg: SVGElement, edge: any, source: any, nodeBoxes: any[], usedLabelBoxes: any[]) {
   if (!source) {
     return;
   }
-  const label = edge.labels?.[0];
-  const section = edge.sections?.[0];
-  if (label || section) {
-    const labelPoint =
-      label && Number.isFinite(label.x) ? { x: label.x, y: label.y + label.height - 3 } : midpoint(section);
+  const value = truncate(source.label || `${source.source_label} → ${source.target_label}`, 42);
+  const labelPoint = chooseLabelPoint(edge, value, nodeBoxes, usedLabelBoxes);
+  if (labelPoint) {
+    const group = svgElement('g', { class: 'wiring-link-label-group' });
+    group.appendChild(
+      svgElement('rect', {
+        class: 'wiring-link-label-bg',
+        x: labelPoint.x - labelPoint.width / 2 - 3,
+        y: labelPoint.y - EDGE_LABEL_HEIGHT / 2 - 2,
+        width: labelPoint.width + 6,
+        height: EDGE_LABEL_HEIGHT + 4,
+        rx: 3,
+      }),
+    );
     const text = svgElement('text', {
       class: 'wiring-link-label',
       x: labelPoint.x,
-      y: labelPoint.y,
+      y: labelPoint.y + 3,
+      'text-anchor': 'middle',
     });
-    text.textContent = truncate(source.label || `${source.source_label} → ${source.target_label}`, 42);
-    svg.appendChild(text);
+    text.textContent = value;
+    group.appendChild(text);
+    svg.appendChild(group);
   }
 }
 
@@ -224,7 +335,8 @@ function renderDiagram(container: HTMLElement, data: any, layout: any) {
     .wiring-port-text { fill: #334155; font-size: 9px; }
     .wiring-link { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
     .wiring-link-hit { fill: none; stroke: transparent; stroke-width: 14; }
-    .wiring-link-label { fill: #7a2d2d; font-size: 10px; paint-order: stroke; stroke: #fbfbfc; stroke-width: 4px; }
+    .wiring-link-label-bg { fill: #fbfbfc; stroke: rgba(122, 45, 45, 0.18); stroke-width: 0.6; }
+    .wiring-link-label { fill: #7a2d2d; font-size: 10px; }
   `;
   svg.appendChild(style);
   svg.appendChild(svgElement('rect', { class: 'wiring-page', x: 0, y: 0, width, height }));
@@ -235,8 +347,10 @@ function renderDiagram(container: HTMLElement, data: any, layout: any) {
   for (const node of layout.children || []) {
     renderNode(svg, node, nodesById.get(node.id));
   }
+  const obstacles = nodeObstacles(layout);
+  const usedLabelBoxes = [];
   for (const edge of layout.edges || []) {
-    renderEdgeLabel(svg, edge, edgesById.get(edge.id));
+    renderEdgeLabel(svg, edge, edgesById.get(edge.id), obstacles, usedLabelBoxes);
   }
 
   container.replaceChildren(svg);
