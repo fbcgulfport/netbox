@@ -67,10 +67,10 @@ function buildElkGraph(data: any) {
       'elk.direction': 'RIGHT',
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.layered.spacing.nodeNodeBetweenLayers': '110',
-      'elk.spacing.nodeNode': '60',
-      'elk.spacing.edgeEdge': '14',
-      'elk.spacing.edgeNode': '24',
-      'elk.spacing.edgeLabel': '12',
+      'elk.spacing.nodeNode': '70',
+      'elk.spacing.edgeEdge': '18',
+      'elk.spacing.edgeNode': '42',
+      'elk.spacing.edgeLabel': '22',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
       'elk.layered.crossingMinimization.semiInteractive': 'true',
       'elk.layered.mergeEdges': 'false',
@@ -137,9 +137,6 @@ function renderNode(svg: SVGElement, node: any, source: any) {
   subtitle.textContent = truncate(source.subtitle, 38);
   link.appendChild(subtitle);
 
-  const rank = svgElement('text', { class: 'wiring-node-rank', x: node.x + node.width - 12, y: node.y + 22 });
-  rank.textContent = source.rank_label;
-  link.appendChild(rank);
   group.appendChild(link);
 
   const portsById = new Map(source.ports.map((port: any) => [port.id, port]));
@@ -179,15 +176,21 @@ function renderEdge(svg: SVGElement, edge: any, source: any) {
     link.appendChild(title);
     svg.appendChild(link);
   }
+}
 
+function renderEdgeLabel(svg: SVGElement, edge: any, source: any) {
+  if (!source) {
+    return;
+  }
   const label = edge.labels?.[0];
   const section = edge.sections?.[0];
   if (label || section) {
-    const labelPoint = label && Number.isFinite(label.x) ? label : midpoint(section);
+    const labelPoint =
+      label && Number.isFinite(label.x) ? { x: label.x, y: label.y + label.height - 3 } : midpoint(section);
     const text = svgElement('text', {
       class: 'wiring-link-label',
       x: labelPoint.x,
-      y: labelPoint.y - 5,
+      y: labelPoint.y,
     });
     text.textContent = truncate(source.label || `${source.source_label} → ${source.target_label}`, 42);
     svg.appendChild(text);
@@ -216,8 +219,7 @@ function renderDiagram(container: HTMLElement, data: any, layout: any) {
     .wiring-node rect { fill: #ffffff; stroke: #8a96a8; stroke-width: 1.2; }
     .wiring-node.external rect { fill: #f8fafc; stroke-dasharray: 5 4; }
     .wiring-node-title { fill: #162033; font-size: 13px; font-weight: 700; }
-    .wiring-node-subtitle, .wiring-node-rank { fill: #526071; font-size: 10px; }
-    .wiring-node-rank { text-anchor: end; }
+    .wiring-node-subtitle { fill: #526071; font-size: 10px; }
     .wiring-port { fill: #ffffff; stroke: #7a2d2d; stroke-width: 1.4; }
     .wiring-port-text { fill: #334155; font-size: 9px; }
     .wiring-link { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
@@ -232,6 +234,9 @@ function renderDiagram(container: HTMLElement, data: any, layout: any) {
   }
   for (const node of layout.children || []) {
     renderNode(svg, node, nodesById.get(node.id));
+  }
+  for (const edge of layout.edges || []) {
+    renderEdgeLabel(svg, edge, edgesById.get(edge.id));
   }
 
   container.replaceChildren(svg);
