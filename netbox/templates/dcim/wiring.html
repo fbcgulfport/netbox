@@ -1,5 +1,6 @@
 {% extends base_template %}
 {% load helpers %}
+{% load static %}
 {% load i18n %}
 
 {% block title %}{% trans "Wiring Diagram" %} {{ scope_title }}{% endblock %}
@@ -11,7 +12,7 @@
     </h2>
     <div class="card-body">
       <div class="text-secondary mb-3">{{ scope_subtitle }}</div>
-      {% if diagram.links %}
+      {% if diagram.edges %}
         <div class="wiring-diagram-toolbar mb-3">
           <a href="{% url 'dcim:cable_list' %}{{ scope_filter_url }}" class="btn btn-sm btn-primary">
             <i class="mdi mdi-cable-data" aria-hidden="true"></i> {% trans "Cables" %}
@@ -23,136 +24,15 @@
             <i class="mdi mdi-arrow-left" aria-hidden="true"></i> {% trans "Back" %}
           </a>
         </div>
-        <div class="wiring-diagram-wrap" style="overflow: auto; border: 1px solid var(--tblr-border-color); border-radius: 4px; background: var(--tblr-bg-surface);">
-          <svg
-            class="wiring-diagram"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 {{ diagram.width }} {{ diagram.height }}"
-            role="img"
-            aria-labelledby="wiring-title wiring-desc"
-          >
-            <title id="wiring-title">{% trans "Wiring diagram for" %} {{ scope_title }}</title>
-            <desc id="wiring-desc">{% trans "Automatically generated from NetBox cable terminations." %}</desc>
-
-            <defs>
-              <filter id="wiring-shadow" x="-10%" y="-10%" width="120%" height="130%">
-                <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#1f2937" flood-opacity="0.18" />
-              </filter>
-            </defs>
-
-            <style>
-              .wiring-diagram {
-                min-width: 960px;
-                width: 100%;
-                height: auto;
-                font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-              }
-              .wiring-page {
-                fill: #fbfbfc;
-              }
-              .wiring-band {
-                fill: #f4f6f8;
-                stroke: #d3d8df;
-                stroke-dasharray: 8 5;
-              }
-              .wiring-band-label {
-                fill: #526071;
-                font-size: 12px;
-                font-weight: 650;
-                letter-spacing: 0;
-              }
-              .wiring-node {
-                fill: #ffffff;
-                stroke: #9aa4b2;
-                stroke-width: 1.2;
-                filter: url(#wiring-shadow);
-              }
-              .wiring-node.external {
-                fill: #f8fafc;
-                stroke-dasharray: 5 4;
-              }
-              .wiring-node-title {
-                fill: #162033;
-                font-size: 13px;
-                font-weight: 700;
-              }
-              .wiring-node-subtitle,
-              .wiring-node-component {
-                fill: #526071;
-                font-size: 10px;
-              }
-              .wiring-link {
-                fill: none;
-                stroke-width: 1.6;
-              }
-              .wiring-link-hit {
-                fill: none;
-                stroke: transparent;
-                stroke-width: 12;
-              }
-              .wiring-link-label {
-                fill: #7a2d2d;
-                font-size: 9px;
-                paint-order: stroke;
-                stroke: #fbfbfc;
-                stroke-width: 3px;
-              }
-              .wiring-port-label {
-                fill: #7a2d2d;
-                font-size: 9px;
-              }
-              .wiring-title-block {
-                fill: #ffffff;
-                stroke: #2f3846;
-                stroke-width: 1;
-              }
-              .wiring-title-text {
-                fill: #162033;
-                font-size: 12px;
-                font-weight: 700;
-              }
-              .wiring-note {
-                fill: #526071;
-                font-size: 10px;
-              }
-            </style>
-
-            <rect class="wiring-page" x="0" y="0" width="{{ diagram.width }}" height="{{ diagram.height }}" />
-
-            {% for column in diagram.columns %}
-              <rect class="wiring-band" x="{{ column.band_x }}" y="34" width="276" height="{{ column.band_height }}" rx="2" />
-              <text class="wiring-band-label" x="{{ column.x }}" y="54">{{ column.label }}</text>
-            {% endfor %}
-
-            {% for link in diagram.links %}
-              <a href="{{ link.url }}">
-                <path class="wiring-link-hit" d="{{ link.path }}" />
-                <path class="wiring-link" d="{{ link.path }}" stroke="{{ link.color }}" />
-                {% if link.label %}
-                  <text class="wiring-link-label" x="{{ link.label_x }}" y="{{ link.label_y }}">{{ link.label }}</text>
-                {% endif %}
-                <text class="wiring-port-label" x="{{ link.label_x }}" y="{{ link.port_label_y }}">{{ link.source_label }} -> {{ link.target_label }}</text>
-              </a>
-            {% endfor %}
-
-            {% for node in diagram.nodes %}
-              <a href="{{ node.url }}">
-                <rect class="wiring-node{% if node.external %} external{% endif %}" x="{{ node.x }}" y="{{ node.y }}" width="{{ node.width }}" height="{{ node.height }}" rx="4" />
-                <text class="wiring-node-title" x="{{ node.text_x }}" y="{{ node.title_y }}">{{ node.title|truncatechars:30 }}</text>
-                <text class="wiring-node-subtitle" x="{{ node.text_x }}" y="{{ node.subtitle_y }}">{{ node.subtitle|truncatechars:34 }}</text>
-                {% for component in node.component_lines %}
-                  <text class="wiring-node-component" x="{{ node.text_x }}" y="{{ component.y }}">
-                    {{ component.label|truncatechars:34 }}
-                  </text>
-                {% endfor %}
-              </a>
-            {% endfor %}
-
-            <rect class="wiring-title-block" x="36" y="{{ diagram.height|add:'-56' }}" width="360" height="34" />
-            <text class="wiring-title-text" x="48" y="{{ diagram.height|add:'-35' }}">{{ scope_title }}</text>
-            <text class="wiring-note" x="176" y="{{ diagram.height|add:'-35' }}">{% trans "Generated from NetBox cable terminations" %}</text>
-          </svg>
+        <div
+          id="wiring-diagram"
+          class="wiring-diagram-wrap"
+          data-scope-title="{{ scope_title }}"
+          style="overflow: auto; min-height: 520px; border: 1px solid var(--tblr-border-color); border-radius: 4px; background: var(--tblr-bg-surface);"
+        >
+          <div class="text-secondary p-4">{% trans "Laying out wiring diagram..." %}</div>
         </div>
+        {{ diagram|json_script:"wiring-diagram-data" }}
       {% else %}
         <div class="empty">
           <div class="empty-icon">
@@ -167,3 +47,8 @@
     </div>
   </div>
 {% endblock content %}
+
+{% block javascript %}
+  {{ block.super }}
+  <script src="{% static_with_params 'wiring_diagram.js' v=settings.RELEASE.version %}"></script>
+{% endblock javascript %}

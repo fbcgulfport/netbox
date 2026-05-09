@@ -76,6 +76,7 @@ async function bundleNetBox() {
   const entryPoints = {
     netbox: 'src/index.ts',
     rack_reorder: 'src/rackReorderEntry.ts',
+    wiring_diagram: 'src/wiringDiagram.ts',
   };
   try {
     const result = await esbuild.build({

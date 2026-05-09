@@ -1378,7 +1378,7 @@ class WiringDiagramMixin:
                 'url': device.get_absolute_url(),
                 'external': external,
                 'rank': rank,
-                'components': [],
+                'ports': {},
             }
 
         if powerfeed := getattr(termination, 'power_panel', None):
@@ -1392,7 +1392,7 @@ class WiringDiagramMixin:
                 'url': termination.get_absolute_url(),
                 'external': external,
                 'rank': 3,
-                'components': [],
+                'ports': {},
             }
 
         if circuit := getattr(termination, 'circuit', None):
@@ -1403,7 +1403,7 @@ class WiringDiagramMixin:
                 'url': termination.get_absolute_url(),
                 'external': True,
                 'rank': 0,
-                'components': [],
+                'ports': {},
             }
 
         return {
@@ -1413,7 +1413,7 @@ class WiringDiagramMixin:
             'url': termination.get_absolute_url() if hasattr(termination, 'get_absolute_url') else '',
             'external': True,
             'rank': 0,
-            'components': [],
+            'ports': {},
         }
 
     def _rank_for_text(self, text, external=False):
@@ -1461,7 +1461,7 @@ class WiringDiagramMixin:
     def _build_diagram(self, request, scope):
         cables = self.get_cables(request, scope)
         nodes = {}
-        links = []
+        edges = []
         for cable in cables:
             a_terms = []
             b_terms = []
@@ -1474,112 +1474,54 @@ class WiringDiagramMixin:
             if not a_terms or not b_terms:
                 continue
 
+            source_ports = []
+            target_ports = []
+            source_labels = []
+            target_labels = []
             for a_term in a_terms:
-                for b_term in b_terms:
-                    a_node = self._node_for_termination(a_term, scope)
-                    b_node = self._node_for_termination(b_term, scope)
-                    nodes.setdefault(a_node['key'], a_node)
-                    nodes.setdefault(b_node['key'], b_node)
-                    nodes[a_node['key']]['components'].append(self._component_label(a_term))
-                    nodes[b_node['key']]['components'].append(self._component_label(b_term))
-                    links.append({
-                        'source': a_node['key'],
-                        'target': b_node['key'],
-                        'source_label': self._component_label(a_term),
-                        'target_label': self._component_label(b_term),
-                        'label': self._connection_label(cable, a_terms, b_terms),
-                        'color': f'#{cable.color}' if cable.color else '#a23c3c',
-                        'url': cable.get_absolute_url(),
-                    })
+                a_node = self._node_for_termination(a_term, scope)
+                nodes.setdefault(a_node['key'], a_node)
+                a_port = self._port_for_termination(a_term, a_node['key'])
+                nodes[a_node['key']]['ports'].setdefault(a_port['id'], a_port)
+                source_ports.append(a_port['id'])
+                source_labels.append(a_port['label'])
 
-        for node in nodes.values():
-            node['components'] = sorted(set(node['components']))[:8]
+            for b_term in b_terms:
+                b_node = self._node_for_termination(b_term, scope)
+                nodes.setdefault(b_node['key'], b_node)
+                b_port = self._port_for_termination(b_term, b_node['key'])
+                nodes[b_node['key']]['ports'].setdefault(b_port['id'], b_port)
+                target_ports.append(b_port['id'])
+                target_labels.append(b_port['label'])
 
-        columns = {}
-        for node in nodes.values():
-            columns.setdefault(node['rank'], []).append(node)
-        if not columns:
-            return {
-                'nodes': [],
-                'links': [],
-                'width': 960,
-                'height': 360,
-                'columns': [],
-            }
-
-        ordered_ranks = sorted(columns)
-        column_width = 320
-        row_height = 126
-        margin_x = 42
-        margin_y = 72
-        node_width = 238
-        node_height = 84
-
-        ordered_columns = []
-        for column_index, rank in enumerate(ordered_ranks):
-            column_nodes = sorted(columns[rank], key=lambda n: (n['external'], n['title']))
-            x = margin_x + column_index * column_width
-            ordered_columns.append({
-                'rank': rank,
-                'label': self.rank_labels.get(rank, _('Other')),
-                'x': x,
-                'band_x': x - 18,
-                'nodes': column_nodes,
+            edges.append({
+                'id': f'cable:{cable.pk}',
+                'sources': source_ports,
+                'targets': target_ports,
+                'source_label': ', '.join(source_labels),
+                'target_label': ', '.join(target_labels),
+                'label': self._connection_label(cable, a_terms, b_terms),
+                'color': f'#{cable.color}' if cable.color else '#a23c3c',
+                'url': cable.get_absolute_url(),
             })
-            for row_index, node in enumerate(column_nodes):
-                node['x'] = x
-                node['y'] = margin_y + row_index * row_height
-                node['width'] = node_width
-                node['height'] = node_height
-                node['source_x'] = x + node_width
-                node['source_y'] = node['y'] + node_height / 2
-                node['target_x'] = x
-                node['target_y'] = node['y'] + node_height / 2
-                node['text_x'] = node['x'] + 12
-                node['title_y'] = node['y'] + 21
-                node['subtitle_y'] = node['y'] + 38
-                node['component_lines'] = [
-                    {
-                        'label': component,
-                        'y': node['y'] + 56 + component_index * 12,
-                    }
-                    for component_index, component in enumerate(node['components'][:3])
-                ]
 
-        width = margin_x * 2 + (len(ordered_ranks) - 1) * column_width + node_width
-        height = max(
-            360,
-            margin_y * 2 + max(len(column['nodes']) for column in ordered_columns) * row_height
-        )
-
-        for index, link in enumerate(links):
-            source = nodes[link['source']]
-            target = nodes[link['target']]
-            if source['x'] <= target['x']:
-                start_x, start_y = source['source_x'], source['source_y']
-                end_x, end_y = target['target_x'], target['target_y']
-            else:
-                start_x, start_y = source['target_x'], source['target_y']
-                end_x, end_y = target['source_x'], target['source_y']
-            midpoint = (start_x + end_x) / 2
-            if abs(end_x - start_x) < node_width:
-                midpoint = max(start_x, end_x) + 44 + (index % 5) * 14
-            else:
-                midpoint += ((index % 5) - 2) * 8
-            link['path'] = f'M {start_x} {start_y} H {midpoint} V {end_y} H {end_x}'
-            link['label_x'] = midpoint + 4
-            link['label_y'] = (start_y + end_y) / 2 - 4
-            link['port_label_y'] = link['label_y'] + 12
-
-        for column in ordered_columns:
-            column['band_height'] = height - 104
+        for node in nodes.values():
+            ports = sorted(node['ports'].values(), key=lambda p: p['label'])
+            node['ports'] = ports
+            node['width'] = 280
+            node['height'] = max(92, 52 + len(ports) * 20)
+            node['rank_label'] = str(self.rank_labels.get(node['rank'], _('Other')))
 
         return {
             'nodes': sorted(nodes.values(), key=lambda n: (n['rank'], n['title'])),
-            'links': links,
-            'width': width,
-            'height': height,
-            'columns': ordered_columns,
+            'edges': edges,
+        }
+
+    def _port_for_termination(self, termination, node_key):
+        return {
+            'id': f'{node_key}:port:{termination._meta.label_lower}:{termination.pk}',
+            'label': self._component_label(termination),
+            'url': termination.get_absolute_url() if hasattr(termination, 'get_absolute_url') else '',
         }
 
     def get(self, request, pk):
