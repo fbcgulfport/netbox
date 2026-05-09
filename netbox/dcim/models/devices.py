@@ -781,6 +781,7 @@ class Device(
         ordering = ('name', 'pk')  # Name may be null
         indexes = (
             models.Index(fields=('name', 'id')),  # Default ordering
+            models.Index(fields=('rack', 'position', 'face'), name='dcim_device_rack_pos_face_idx'),
         )
         constraints = (
             models.UniqueConstraint(
@@ -797,9 +798,6 @@ class Device(
                 fields=('virtual_chassis', 'vc_position'),
                 name='%(app_label)s_%(class)s_unique_virtual_chassis_vc_position'
             ),
-        )
-        indexes = (
-            models.Index(fields=('rack', 'position', 'face'), name='dcim_device_rack_pos_face_idx'),
         )
         verbose_name = _('device')
         verbose_name_plural = _('devices')
