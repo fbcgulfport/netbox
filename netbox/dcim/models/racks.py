@@ -484,10 +484,14 @@ class Rack(ContactsMixin, ImageAttachmentsMixin, TrackingModelMixin, RackBase):
     def get_status_color(self):
         return RackStatusChoices.colors.get(self.status)
 
-    def get_rack_units(self, user=None, face=DeviceFaceChoices.FACE_FRONT, exclude=None, expand_devices=True):
+    def get_rack_units(
+            self, user=None, face=DeviceFaceChoices.FACE_FRONT, exclude=None, expand_devices=True,
+            rack_position_offset=0, rack_position_width=1
+    ):
         """
-        Return a list of rack units as dictionaries. Example: {'device': None, 'face': 0, 'id': 48, 'name': 'U48'}
-        Each key 'device' is either a Device or None. By default, multi-U devices are repeated for each U they occupy.
+        Return a list of rack units as dictionaries. Example: {'device': None, 'face': 0, 'id': 48, 'name': 'U48'}.
+        Each key 'device' is either a Device or None for compatibility; 'devices' contains all devices occupying the
+        unit. By default, multi-U devices are repeated for each U they occupy.
 
         :param face: Rack face (front or rear)
         :param user: User instance to be used for evaluating device view permissions. If None, all devices
@@ -496,7 +500,13 @@ class Rack(ContactsMixin, ImageAttachmentsMixin, TrackingModelMixin, RackBase):
         :param expand_devices: When True, all units that a device occupies will be listed with each containing a
             reference to the device. When False, only the bottom most unit for a device is included and that unit
             contains a height attribute for the device
+        :param rack_position_offset: Horizontal offset to evaluate for availability
+        :param rack_position_width: Horizontal width to evaluate for availability
         """
+        lane_start = decimal.Decimal(rack_position_offset or 0)
+        lane_width = decimal.Decimal(rack_position_width or 1)
+        lane_end = lane_start + lane_width
+        exclude = [exclude] if isinstance(exclude, int) else exclude
         elevation = {}
         for u in self.units:
             u_name = f'U{u}'.split('.')[0] if not u % 1 else f'U{u}'
@@ -505,7 +515,10 @@ class Rack(ContactsMixin, ImageAttachmentsMixin, TrackingModelMixin, RackBase):
                 'name': u_name,
                 'face': face,
                 'device': None,
-                'occupied': False
+                'devices': [],
+                'occupied': False,
+                'available': True,
+                'unavailable': False,
             }
 
         # Add devices to rack units list
@@ -518,15 +531,16 @@ class Rack(ContactsMixin, ImageAttachmentsMixin, TrackingModelMixin, RackBase):
                 'role'
             ).annotate(
                 devicebay_count=Count('devicebays')
-            ).exclude(
-                pk=exclude
             ).filter(
                 rack=self,
                 position__gt=0,
                 device_type__u_height__gt=0
             ).filter(
                 Q(face=face) | Q(device_type__is_full_depth=True)
-            )
+            ).order_by('position', 'rack_position_offset', 'pk')
+
+            if exclude is not None:
+                devices = devices.exclude(pk__in=exclude)
 
             # Determine which devices the user has permission to view
             permitted_device_ids = []
@@ -534,30 +548,63 @@ class Rack(ContactsMixin, ImageAttachmentsMixin, TrackingModelMixin, RackBase):
                 permitted_device_ids = self.devices.restrict(user, 'view').values_list('pk', flat=True)
 
             for device in devices:
+                device_width = device.rack_position_width or decimal.Decimal(1)
+                device_start = device.rack_position_offset or decimal.Decimal(0)
+                if device.device_type.is_full_depth and device.face != face:
+                    device_start = decimal.Decimal(1) - device_start - device_width
+                device_end = device_start + device_width
+                lane_conflict = lane_start < device_end and device_start < lane_end
+
                 if expand_devices:
                     for u in drange(device.position, device.position + device.device_type.u_height, 0.5):
                         if user is None or device.pk in permitted_device_ids:
-                            elevation[u]['device'] = device
+                            elevation[u]['devices'].append(device)
+                            if elevation[u]['device'] is None:
+                                elevation[u]['device'] = device
                         elevation[u]['occupied'] = True
+                        if lane_conflict:
+                            elevation[u]['available'] = False
+                            elevation[u]['unavailable'] = True
                 else:
                     if user is None or device.pk in permitted_device_ids:
-                        elevation[device.position]['device'] = device
+                        elevation[device.position]['devices'].append(device)
+                        if elevation[device.position]['device'] is None:
+                            elevation[device.position]['device'] = device
                     elevation[device.position]['occupied'] = True
-                    elevation[device.position]['height'] = device.device_type.u_height
+                    if 'height' not in elevation[device.position]:
+                        elevation[device.position]['height'] = device.device_type.u_height
+                    if lane_conflict:
+                        elevation[device.position]['available'] = False
+                        elevation[device.position]['unavailable'] = True
 
         return [u for u in elevation.values()]
 
-    def get_available_units(self, u_height=1.0, rack_face=None, exclude=None, ignore_excluded_devices=False):
+    def get_available_units(
+            self, u_height=1.0, rack_face=None, exclude=None, ignore_excluded_devices=False,
+            rack_position_offset=0, rack_position_width=1, is_full_depth=False
+    ):
         """
         Return a list of units within the rack available to accommodate a device of a given U height (default 1).
         Optionally exclude one or more devices when calculating empty units (needed when moving a device from one
         position to another within a rack).
 
         :param u_height: Minimum number of contiguous free units required
-        :param rack_face: The face of the rack (front or rear) required; 'None' if device is full depth
+        :param rack_face: The mounted face of the device being placed
         :param exclude: List of devices IDs to exclude (useful when moving a device within a rack)
         :param ignore_excluded_devices: Ignore devices that are marked to exclude from utilization calculations
+        :param rack_position_offset: Horizontal offset to evaluate for availability
+        :param rack_position_width: Horizontal width to evaluate for availability
+        :param is_full_depth: True if the device being placed consumes both faces
         """
+        requested_height = decimal.Decimal(u_height)
+        requested_width = decimal.Decimal(rack_position_width or 1)
+        requested_start = decimal.Decimal(rack_position_offset or 0)
+        if rack_face == DeviceFaceChoices.FACE_REAR:
+            requested_start = decimal.Decimal(1) - requested_start - requested_width
+        requested_end = requested_start + requested_width
+
+        exclude = [exclude] if isinstance(exclude, int) else exclude
+
         # Gather all devices which consume U space within the rack
         devices = self.devices.prefetch_related('device_type').filter(position__gte=1)
         if ignore_excluded_devices:
@@ -566,23 +613,33 @@ class Rack(ContactsMixin, ImageAttachmentsMixin, TrackingModelMixin, RackBase):
         if exclude is not None:
             devices = devices.exclude(pk__in=exclude)
 
-        # Initialize the rack unit skeleton
         units = list(self.units)
-
-        # Remove units consumed by installed devices
-        for d in devices:
-            if rack_face is None or d.face == rack_face or d.device_type.is_full_depth:
-                for u in drange(d.position, d.position + d.device_type.u_height, 0.5):
-                    try:
-                        units.remove(u)
-                    except ValueError:
-                        # Found overlapping devices in the rack!
-                        pass
-
-        # Remove units without enough space above them to accommodate a device of the specified height
         available_units = []
         for u in units:
-            if set(drange(u, u + decimal.Decimal(u_height), 0.5)).issubset(units):
+            required_units = set(drange(u, u + requested_height, 0.5))
+            if not required_units.issubset(units):
+                continue
+
+            requested_top = u + requested_height
+            for d in devices:
+                if (
+                        rack_face is not None and not is_full_depth and d.face != rack_face and
+                        not d.device_type.is_full_depth
+                ):
+                    continue
+
+                device_width = d.rack_position_width or decimal.Decimal(1)
+                device_start = d.rack_position_offset or decimal.Decimal(0)
+                if d.face == DeviceFaceChoices.FACE_REAR:
+                    device_start = decimal.Decimal(1) - device_start - device_width
+                device_end = device_start + device_width
+                if not (requested_start < device_end and device_start < requested_end):
+                    continue
+
+                device_top = d.position + d.device_type.u_height
+                if u < device_top and d.position < requested_top:
+                    break
+            else:
                 available_units.append(u)
 
         return list(reversed(available_units))
@@ -643,18 +700,38 @@ class Rack(ContactsMixin, ImageAttachmentsMixin, TrackingModelMixin, RackBase):
         Determine the utilization rate of the rack and return it as a percentage. Occupied and reserved units both count
         as utilized.
         """
-        # Determine unoccupied units
-        total_units = len(list(self.units))
-        available_units = self.get_available_units(u_height=0.5, ignore_excluded_devices=True)
+        units = list(self.units)
+        total_area = len(units)
+        if not total_area:
+            return 0
 
-        # Remove reserved units
+        occupied = {u: [] for u in units}
+        devices = self.devices.prefetch_related('device_type').filter(position__gte=1).exclude(
+            device_type__exclude_from_utilization=True
+        )
+        for device in devices:
+            lane_start = device.rack_position_offset or decimal.Decimal(0)
+            lane_end = lane_start + (device.rack_position_width or decimal.Decimal(1))
+            for u in drange(device.position, device.position + device.device_type.u_height, 0.5):
+                if u in occupied:
+                    occupied[u].append((lane_start, lane_end))
+
         for ru in self.get_reserved_units():
             for u in drange(ru, ru + 1, 0.5):
-                if u in available_units:
-                    available_units.remove(u)
+                if u in occupied:
+                    occupied[u].append((decimal.Decimal(0), decimal.Decimal(1)))
 
-        occupied_unit_count = total_units - len(available_units)
-        percentage = float(occupied_unit_count) / total_units * 100
+        occupied_area = decimal.Decimal(0)
+        for intervals in occupied.values():
+            intervals.sort()
+            cursor = decimal.Decimal(0)
+            for start, end in intervals:
+                if end <= cursor:
+                    continue
+                occupied_area += end - max(start, cursor)
+                cursor = end
+
+        percentage = float(occupied_area) / total_area * 100
 
         return percentage
 

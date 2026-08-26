@@ -1,10 +1,15 @@
+import json
+import decimal
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, PageNotAnInteger
 from django.db import router, transaction
 from django.db.models import Func, IntegerField, Prefetch
 from django.forms import ModelMultipleChoiceField, MultipleHiddenInput, modelformset_factory
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import escape
@@ -1193,6 +1198,516 @@ class RackNonRackedView(generic.ObjectChildrenView):
         return parent.devices.restrict(request.user, 'view').filter(
             rack=parent, position__isnull=True, parent_bay__isnull=True
         )
+
+
+@register_model_view(Rack, 'reorder')
+class RackReorderView(View):
+    queryset = Rack.objects.all()
+    template_name = 'dcim/rack/reorder.html'
+    tab = ViewTab(
+        label=_('Reorder'),
+        weight=520,
+        permission='dcim.change_device',
+    )
+
+    @staticmethod
+    def _grid_y(rack, device):
+        height = device.device_type.u_height
+        if rack.desc_units:
+            return int((device.position - rack.starting_unit) * 2)
+        return int((rack.u_height - device.position + rack.starting_unit - height) * 2)
+
+    @staticmethod
+    def _position_from_grid(rack, y, height):
+        y = decimal.Decimal(str(y)) / 2
+        height = decimal.Decimal(str(height)) / 2
+        if rack.desc_units:
+            return rack.starting_unit + y
+        return rack.u_height + rack.starting_unit - height - y
+
+    @staticmethod
+    def _device_width(device):
+        return device.rack_position_width or device.device_type.rack_position_width or decimal.Decimal(1)
+
+    def _device_item(self, rack, device):
+        width = self._device_width(device)
+        return {
+            'device': device,
+            'x': int((device.rack_position_offset or decimal.Decimal(0)) * 100),
+            'y': self._grid_y(rack, device) if device.position else 0,
+            'w': max(1, int(width * 100)),
+            'h': max(1, int(device.device_type.u_height * 2)),
+        }
+
+    def _get_context(self, request, rack):
+        peer_racks = Rack.objects.restrict(request.user, 'view').filter(site=rack.site)
+        if rack.location:
+            peer_racks = peer_racks.filter(location=rack.location)
+        else:
+            peer_racks = peer_racks.filter(location__isnull=True)
+
+        devices = rack.devices.restrict(request.user, 'view').prefetch_related(
+            'device_type', 'device_type__manufacturer', 'role'
+        ).filter(parent_bay__isnull=True)
+        racked_devices = devices.filter(position__gt=0).order_by('position', 'rack_position_offset', 'pk')
+        non_racked = devices.filter(position__isnull=True).exclude(device_type__subdevice_role='child')
+
+        unit_labels = []
+        for unit in rack.units:
+            unit_labels.append(str(int(unit)) if unit % 1 == 0 else '')
+
+        non_racked_items = []
+        y = 0
+        for device in non_racked.order_by('name', 'pk'):
+            item = self._device_item(rack, device)
+            item['x'] = 0
+            item['y'] = y
+            y += item['h']
+            non_racked_items.append(item)
+
+        return {
+            'object': rack,
+            'peer_racks': peer_racks,
+            'prev_rack': peer_racks.filter(name__lt=rack.name).reverse().first(),
+            'next_rack': peer_racks.filter(name__gt=rack.name).first(),
+            'front_items': [
+                self._device_item(rack, d) for d in racked_devices.filter(face=DeviceFaceChoices.FACE_FRONT)
+            ],
+            'rear_items': [
+                self._device_item(rack, d) for d in racked_devices.filter(face=DeviceFaceChoices.FACE_REAR)
+            ],
+            'non_racked_items': non_racked_items,
+            'unit_labels': unit_labels,
+            'rack_rows': int(rack.u_height * 2),
+            'save_url': request.path,
+            'return_url': rack.get_absolute_url(),
+        }
+
+    def get(self, request, pk):
+        rack = get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+        if not request.user.has_perm(get_permission_for_model(Device, 'change')):
+            return redirect(rack.get_absolute_url())
+        return render(request, self.template_name, self._get_context(request, rack))
+
+    def post(self, request, pk):
+        rack = get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+        permission = get_permission_for_model(Device, 'change')
+        if not request.user.has_perm(permission):
+            return JsonResponse({'error': _('Permission denied.')}, status=403)
+
+        try:
+            data = json.loads(request.body or '{}')
+            devices = data.get('devices', [])
+        except json.JSONDecodeError:
+            return JsonResponse({'error': _('Invalid JSON payload.')}, status=400)
+
+        try:
+            with transaction.atomic():
+                for item in devices:
+                    device = get_object_or_404(rack.devices.restrict(request.user, 'view'), pk=item.get('id'))
+                    if not request.user.has_perm(permission, obj=device):
+                        return JsonResponse({'error': _('Permission denied for device {device}.').format(
+                            device=device
+                        )}, status=403)
+
+                    face = item.get('face')
+                    if face in (DeviceFaceChoices.FACE_FRONT, DeviceFaceChoices.FACE_REAR):
+                        width = decimal.Decimal(str(item.get('width', 1))).quantize(decimal.Decimal('0.01'))
+                        offset = decimal.Decimal(str(item.get('offset', 0))).quantize(decimal.Decimal('0.01'))
+                        height = decimal.Decimal(str(item.get('height', 1)))
+                        device.position = self._position_from_grid(rack, item.get('y', 0), height)
+                        device.face = face
+                        device.rack_position_offset = offset
+                        device.rack_position_width = width
+                    else:
+                        device.position = None
+                        device.face = ''
+                        device.rack_position_offset = decimal.Decimal(0)
+                        device.rack_position_width = device.device_type.rack_position_width
+
+                    device.clean()
+                    device.save()
+        except ValidationError as exc:
+            error = exc.message_dict if hasattr(exc, 'message_dict') else exc.messages
+            return JsonResponse({'error': error}, status=400)
+        except Exception as exc:
+            return JsonResponse({'error': str(exc)}, status=500)
+
+        return JsonResponse({'message': _('Rack reordered successfully.')})
+
+
+class WiringDiagramMixin:
+    template_name = 'dcim/wiring.html'
+    base_template = 'generic/object.html'
+    scope_kind = 'object'
+    scope_filter_url = ''
+    scope_subtitle = _('Generated from NetBox cable terminations.')
+    rank_keywords = (
+        (0, ('microphone', 'mic', 'input', 'source', 'wall box', 'wallbox')),
+        (1, ('patch', 'panel', 'stagebox', 'wall plate', 'wallplate', 'snake')),
+        (2, ('processor', 'dsp', 'mixer', 'matrix', 'switch', 'router', 'amp', 'amplifier', 'output')),
+    )
+    rank_labels = {
+        0: _('Sources / External'),
+        1: _('Patch / Distribution'),
+        2: _('Processing / Outputs'),
+        3: _('Power / Other'),
+    }
+
+    def get_scope(self, request, pk=None):
+        return None
+
+    def get_scope_title(self, scope):
+        return str(scope) if scope is not None else _('All Wiring')
+
+    def get_return_url(self, scope):
+        return scope.get_absolute_url() if scope is not None else reverse('dcim:cable_list')
+
+    def get_cables(self, request, scope):
+        return Cable.objects.restrict(request.user, 'view').none()
+
+    def is_external(self, termination, scope):
+        return False
+
+    def _node_for_termination(self, termination, scope):
+        if device := getattr(termination, 'device', None):
+            role = str(device.role) if device.role else ''
+            title = device.name
+            subtitle = role or str(device.device_type)
+            external = self.is_external(termination, scope)
+            text = ' '.join((title, subtitle, str(device.device_type))).lower()
+            rank = self._rank_for_text(text, external)
+            return {
+                'key': f'device:{device.pk}',
+                'title': title,
+                'subtitle': subtitle,
+                'url': device.get_absolute_url(),
+                'external': external,
+                'rank': rank,
+                'ports': {},
+            }
+
+        if powerfeed := getattr(termination, 'power_panel', None):
+            title = str(termination)
+            subtitle = str(powerfeed)
+            external = self.is_external(termination, scope)
+            return {
+                'key': f'powerfeed:{termination.pk}',
+                'title': title,
+                'subtitle': subtitle,
+                'url': termination.get_absolute_url(),
+                'external': external,
+                'rank': 3,
+                'ports': {},
+            }
+
+        if circuit := getattr(termination, 'circuit', None):
+            return {
+                'key': f'circuittermination:{termination.pk}',
+                'title': str(circuit),
+                'subtitle': str(circuit.provider),
+                'url': termination.get_absolute_url(),
+                'external': True,
+                'rank': 0,
+                'ports': {},
+            }
+
+        return {
+            'key': f'{termination._meta.label_lower}:{termination.pk}',
+            'title': str(termination),
+            'subtitle': str(termination._meta.verbose_name),
+            'url': termination.get_absolute_url() if hasattr(termination, 'get_absolute_url') else '',
+            'external': True,
+            'rank': 0,
+            'ports': {},
+        }
+
+    def _rank_for_text(self, text, external=False):
+        if external:
+            return 0
+        for rank, keywords in self.rank_keywords:
+            if any(keyword in text for keyword in keywords):
+                return rank
+        return 1
+
+    @staticmethod
+    def _component_label(termination):
+        label = getattr(termination, 'label', None) or getattr(termination, 'name', None)
+        if label:
+            return label
+        return str(termination)
+
+    @staticmethod
+    def _connection_label(cable, a_terms, b_terms):
+        parts = []
+        if cable.label:
+            parts.append(cable.label)
+        if cable.color:
+            parts.append(f'#{cable.color}')
+        if cable.type:
+            parts.append(cable.get_type_display())
+        if len(a_terms) > 1 or len(b_terms) > 1:
+            parts.append(f'{len(a_terms)}x{len(b_terms)}')
+        return ' | '.join(parts)
+
+    @staticmethod
+    def _scoped_cables(request, **filters):
+        cable_ids = set(
+            CableTermination.objects.restrict(request.user, 'view')
+            .filter(**filters)
+            .values_list('cable_id', flat=True)
+        )
+        return (
+            Cable.objects.restrict(request.user, 'view')
+            .filter(pk__in=cable_ids)
+            .prefetch_related('terminations__termination', 'terminations__termination_type')
+            .order_by('label', 'pk')
+        )
+
+    def _build_diagram(self, request, scope):
+        cables = self.get_cables(request, scope)
+        nodes = {}
+        edges = []
+        for cable in cables:
+            a_terms = []
+            b_terms = []
+            for cable_termination in cable.terminations.all():
+                if cable_termination.cable_end == 'A':
+                    a_terms.append(cable_termination.termination)
+                else:
+                    b_terms.append(cable_termination.termination)
+
+            if not a_terms or not b_terms:
+                continue
+
+            cable_label = self._connection_label(cable, a_terms, b_terms)
+            cable_color = f'#{cable.color}' if cable.color else '#a23c3c'
+            cable_url = cable.get_absolute_url()
+            if len(a_terms) == 1 and len(b_terms) == 1:
+                a_term = a_terms[0]
+                b_term = b_terms[0]
+                a_node = self._node_for_termination(a_term, scope)
+                b_node = self._node_for_termination(b_term, scope)
+                nodes.setdefault(a_node['key'], a_node)
+                nodes.setdefault(b_node['key'], b_node)
+                a_port = self._port_for_termination(a_term, a_node['key'])
+                b_port = self._port_for_termination(b_term, b_node['key'])
+                nodes[a_node['key']]['ports'].setdefault(a_port['id'], a_port)
+                nodes[b_node['key']]['ports'].setdefault(b_port['id'], b_port)
+                edges.append({
+                    'id': f'cable:{cable.pk}',
+                    'sources': [a_port['id']],
+                    'targets': [b_port['id']],
+                    'source_label': a_port['label'],
+                    'target_label': b_port['label'],
+                    'label': cable_label,
+                    'color': cable_color,
+                    'url': cable_url,
+                })
+                continue
+
+            cable_node = {
+                'key': f'cable-node:{cable.pk}',
+                'title': cable.label or str(cable),
+                'subtitle': _('Cable junction'),
+                'url': cable_url,
+                'external': False,
+                'rank': 1,
+                'ports': {},
+            }
+            nodes.setdefault(cable_node['key'], cable_node)
+
+            for a_term in a_terms:
+                a_node = self._node_for_termination(a_term, scope)
+                nodes.setdefault(a_node['key'], a_node)
+                a_port = self._port_for_termination(a_term, a_node['key'])
+                cable_port = self._cable_port_for_termination(cable, a_term, cable_node['key'], 'A')
+                nodes[a_node['key']]['ports'].setdefault(a_port['id'], a_port)
+                nodes[cable_node['key']]['ports'].setdefault(cable_port['id'], cable_port)
+                edges.append({
+                    'id': f'cable:{cable.pk}:A:{a_term._meta.label_lower}:{a_term.pk}',
+                    'sources': [a_port['id']],
+                    'targets': [cable_port['id']],
+                    'source_label': a_port['label'],
+                    'target_label': cable_port['label'],
+                    'label': cable_label,
+                    'color': cable_color,
+                    'url': cable_url,
+                })
+
+            for b_term in b_terms:
+                b_node = self._node_for_termination(b_term, scope)
+                nodes.setdefault(b_node['key'], b_node)
+                b_port = self._port_for_termination(b_term, b_node['key'])
+                cable_port = self._cable_port_for_termination(cable, b_term, cable_node['key'], 'B')
+                nodes[b_node['key']]['ports'].setdefault(b_port['id'], b_port)
+                nodes[cable_node['key']]['ports'].setdefault(cable_port['id'], cable_port)
+                edges.append({
+                    'id': f'cable:{cable.pk}:B:{b_term._meta.label_lower}:{b_term.pk}',
+                    'sources': [cable_port['id']],
+                    'targets': [b_port['id']],
+                    'source_label': cable_port['label'],
+                    'target_label': b_port['label'],
+                    'label': cable_label,
+                    'color': cable_color,
+                    'url': cable_url,
+                })
+
+        for node in nodes.values():
+            ports = sorted(node['ports'].values(), key=lambda p: p['label'])
+            node['ports'] = ports
+            node['width'] = 280
+            node['height'] = max(92, 52 + len(ports) * 20)
+            node['rank_label'] = str(self.rank_labels.get(node['rank'], _('Other')))
+
+        return {
+            'nodes': sorted(nodes.values(), key=lambda n: (n['rank'], n['title'])),
+            'edges': edges,
+        }
+
+    def _port_for_termination(self, termination, node_key):
+        return {
+            'id': f'{node_key}:port:{termination._meta.label_lower}:{termination.pk}',
+            'label': self._component_label(termination),
+            'url': termination.get_absolute_url() if hasattr(termination, 'get_absolute_url') else '',
+        }
+
+    def _cable_port_for_termination(self, cable, termination, node_key, cable_end):
+        return {
+            'id': f'{node_key}:port:{cable_end}:{termination._meta.label_lower}:{termination.pk}',
+            'label': f'{cable_end}: {self._component_label(termination)}',
+            'url': cable.get_absolute_url(),
+        }
+
+    def get(self, request, pk):
+        scope = self.get_scope(request, pk)
+        if not request.user.has_perm(get_permission_for_model(Cable, 'view')):
+            return redirect(self.get_return_url(scope))
+        return render(request, self.template_name, {
+            'object': scope,
+            'base_template': self.base_template,
+            'diagram': self._build_diagram(request, scope),
+            'scope_kind': self.scope_kind,
+            'scope_title': self.get_scope_title(scope),
+            'scope_subtitle': self.scope_subtitle,
+            'return_url': self.get_return_url(scope),
+            'scope_filter_url': self.scope_filter_url,
+        })
+
+
+@register_model_view(Rack, 'wiring')
+class RackWiringDiagramView(WiringDiagramMixin, View):
+    queryset = Rack.objects.all()
+    base_template = 'dcim/rack/base.html'
+    scope_kind = 'rack'
+    tab = ViewTab(
+        label=_('Wiring'),
+        weight=530,
+        permission='dcim.view_cable',
+    )
+
+    def get_scope(self, request, pk=None):
+        return get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+
+    def get(self, request, pk):
+        self.scope_filter_url = f'?rack_id={pk}'
+        return super().get(request, pk)
+
+    def get_cables(self, request, scope):
+        return self._scoped_cables(request, _rack=scope)
+
+    def is_external(self, termination, scope):
+        if device := getattr(termination, 'device', None):
+            return device.rack_id != scope.pk
+        return getattr(termination, 'rack_id', None) != scope.pk
+
+
+@register_model_view(Site, 'wiring')
+class SiteWiringDiagramView(WiringDiagramMixin, View):
+    queryset = Site.objects.all()
+    base_template = 'dcim/site.html'
+    scope_kind = 'site'
+    tab = ViewTab(
+        label=_('Wiring'),
+        weight=530,
+        permission='dcim.view_cable',
+    )
+
+    def get_scope(self, request, pk=None):
+        return get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+
+    def get(self, request, pk):
+        self.scope_filter_url = f'?site_id={pk}'
+        return super().get(request, pk)
+
+    def get_cables(self, request, scope):
+        return self._scoped_cables(request, _site=scope)
+
+    def is_external(self, termination, scope):
+        if device := getattr(termination, 'device', None):
+            return device.site_id != scope.pk
+        return getattr(termination, 'site_id', None) != scope.pk
+
+
+@register_model_view(DeviceRole, 'wiring')
+class DeviceRoleWiringDiagramView(WiringDiagramMixin, View):
+    queryset = DeviceRole.objects.all()
+    base_template = 'dcim/devicerole.html'
+    scope_kind = 'role'
+    tab = ViewTab(
+        label=_('Wiring'),
+        weight=530,
+        permission='dcim.view_cable',
+    )
+
+    def get_scope(self, request, pk=None):
+        return get_object_or_404(self.queryset.restrict(request.user, 'view'), pk=pk)
+
+    def _role_ids(self, role):
+        if not hasattr(self, '_role_id_cache'):
+            if hasattr(role, 'get_descendants'):
+                self._role_id_cache = set(role.get_descendants(include_self=True).values_list('pk', flat=True))
+            else:
+                self._role_id_cache = {role.pk}
+        return self._role_id_cache
+
+    def get_cables(self, request, scope):
+        return self._scoped_cables(request, _device__role_id__in=self._role_ids(scope))
+
+    def is_external(self, termination, scope):
+        if device := getattr(termination, 'device', None):
+            return device.role_id not in self._role_ids(scope)
+        return True
+
+
+class GlobalWiringDiagramView(WiringDiagramMixin, View):
+    base_template = 'base/layout.html'
+    scope_kind = 'global'
+    scope_subtitle = _('Every cable visible to you in one generated wiring diagram.')
+
+    def get_cables(self, request, scope):
+        return (
+            Cable.objects.restrict(request.user, 'view')
+            .prefetch_related('terminations__termination', 'terminations__termination_type')
+            .order_by('label', 'pk')
+        )
+
+    def get_return_url(self, scope):
+        return reverse('dcim:cable_list')
+
+    def get(self, request):
+        if not request.user.has_perm(get_permission_for_model(Cable, 'view')):
+            return redirect(reverse('dcim:cable_list'))
+        return render(request, self.template_name, {
+            'object': None,
+            'base_template': self.base_template,
+            'diagram': self._build_diagram(request, None),
+            'scope_kind': self.scope_kind,
+            'scope_title': self.get_scope_title(None),
+            'scope_subtitle': self.scope_subtitle,
+            'return_url': self.get_return_url(None),
+            'scope_filter_url': '',
+        })
 
 
 @register_model_view(Rack, 'add', detail=False)

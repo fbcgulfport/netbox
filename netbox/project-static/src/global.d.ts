@@ -75,6 +75,11 @@ type APIUserConfig = {
 
 declare const messages: string[];
 
+declare module 'elkjs/lib/elk.bundled.js' {
+  const ELK: any;
+  export default ELK;
+}
+
 type FormControls = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
 type ColorMode = 'light' | 'dark';

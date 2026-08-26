@@ -1,0 +1,52 @@
+{% extends 'dcim/rack/base.html' %}
+{% load helpers %}
+{% load i18n %}
+{% load perms %}
+{% load static %}
+
+{% block title %}{% trans "Reorder" %} {{ object }}{% endblock %}
+
+{% block head %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static_with_params 'rack_reorder.css' v=settings.RELEASE.version %}" />
+{% endblock head %}
+
+{% block content %}
+  <div
+    class="rack-reorder"
+    data-rack-reorder
+    data-save-url="{{ save_url }}"
+    data-return-url="{{ return_url }}"
+    data-rack-height="{{ object.u_height }}"
+    data-rack-rows="{{ rack_rows }}"
+    data-starting-unit="{{ object.starting_unit }}"
+    data-desc-units="{{ object.desc_units|yesno:'true,false' }}"
+  >
+    {% csrf_token %}
+    <div class="d-flex justify-content-end gap-2 mb-3">
+      <button type="button" class="btn btn-success" data-rack-reorder-save disabled>
+        <i class="mdi mdi-content-save" aria-hidden="true"></i> {% trans "Save" %}
+      </button>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-lg-4 col-md-6 col-12">
+        <h3 class="h5 text-center">{% trans "Front" %}</h3>
+        {% include 'dcim/rack/reorder_grid.html' with grid_id='front' face='front' items=front_items show_units=True %}
+      </div>
+      <div class="col-lg-4 col-md-6 col-12">
+        <h3 class="h5 text-center">{% trans "Rear" %}</h3>
+        {% include 'dcim/rack/reorder_grid.html' with grid_id='rear' face='rear' items=rear_items show_units=True %}
+      </div>
+      <div class="col-lg-4 col-12">
+        <h3 class="h5 text-center">{% trans "Non-Racked Devices" %}</h3>
+        {% include 'dcim/rack/reorder_grid.html' with grid_id='other' face='none' items=non_racked_items show_units=False %}
+      </div>
+    </div>
+  </div>
+{% endblock content %}
+
+{% block javascript %}
+  {{ block.super }}
+  <script src="{% static_with_params 'rack_reorder.js' v=settings.RELEASE.version %}"></script>
+{% endblock javascript %}

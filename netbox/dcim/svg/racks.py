@@ -3,7 +3,7 @@ import decimal
 import svgwrite
 from django.conf import settings
 from django.core.exceptions import FieldError
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.template.defaultfilters import floatformat
 from django.urls import reverse
 from django.utils.http import urlencode
@@ -48,6 +48,7 @@ def get_device_description(device):
     Role: <role>
     Status: <status>
     Device Type: <manufacturer> <model> (<u_height>)
+    Rack Row: <offset>/<width>
     Asset tag: <asset_tag> (if defined)
     Serial: <serial> (if defined)
     Description: <description> (if defined)
@@ -57,6 +58,8 @@ def get_device_description(device):
     description += f'\nStatus: {device.get_status_display()}'
     u_height = f'{floatformat(device.device_type.u_height)}U'
     description += f'\nDevice Type: {device.device_type.manufacturer.name} {device.device_type.model} ({u_height})'
+    rack_row = f'offset {floatformat(device.rack_position_offset)}, width {floatformat(device.rack_position_width)}'
+    description += f'\nRack Row: {rack_row}'
     if device.asset_tag:
         description += f'\nAsset tag: {device.asset_tag}'
     if device.serial:
@@ -158,11 +161,11 @@ class RackElevationSVG:
 
         return drawing
 
-    def _get_device_coords(self, position, height):
+    def _get_device_coords(self, position, height, rack_position_offset=0):
         """
         Return the X, Y coordinates of the top left corner for a device in the specified rack unit.
         """
-        x = self.legend_width + RACK_ELEVATION_BORDER_WIDTH
+        x = self.legend_width + RACK_ELEVATION_BORDER_WIDTH + float(rack_position_offset) * self.unit_width
         y = RACK_ELEVATION_BORDER_WIDTH
         if self.rack.desc_units:
             y += int((position - self.rack.starting_unit) * self.unit_height)
@@ -294,60 +297,115 @@ class RackElevationSVG:
                 )
                 self.drawing.add(link)
 
+    def _get_face_devices(self, face):
+        return self.rack.devices.prefetch_related(
+            'device_type',
+            'device_type__manufacturer',
+            'role'
+        ).annotate(
+            devicebay_count=Count('devicebays')
+        ).filter(
+            position__gt=0,
+            device_type__u_height__gt=0
+        ).filter(
+            Q(face=face) | Q(device_type__is_full_depth=True)
+        ).order_by('position', 'rack_position_offset', 'pk')
+
+    def _get_rendered_lane(self, device, face):
+        lane_width = device.rack_position_width or decimal.Decimal(1)
+        lane_offset = device.rack_position_offset or decimal.Decimal(0)
+        if device.device_type.is_full_depth and device.face != face:
+            lane_offset = decimal.Decimal(1) - lane_offset - lane_width
+        return lane_offset, lane_width
+
+    def _get_background_gaps(self, unit, face, devices):
+        occupied = []
+        unit_start = decimal.Decimal(unit)
+        unit_end = unit_start + decimal.Decimal(1)
+        for device in devices:
+            device_top = device.position + device.device_type.u_height
+            if not (unit_start < device_top and device.position < unit_end):
+                continue
+            lane_offset, lane_width = self._get_rendered_lane(device, face)
+            occupied.append((lane_offset, lane_offset + lane_width))
+
+        if not occupied:
+            return [(decimal.Decimal(0), decimal.Decimal(1))]
+
+        occupied.sort()
+        merged = []
+        for start, end in occupied:
+            if not merged or start > merged[-1][1]:
+                merged.append([start, end])
+            elif end > merged[-1][1]:
+                merged[-1][1] = end
+
+        gaps = []
+        cursor = decimal.Decimal(0)
+        for start, end in merged:
+            if start > cursor:
+                gaps.append((cursor, start - cursor))
+            cursor = max(cursor, end)
+        if cursor < decimal.Decimal(1):
+            gaps.append((cursor, decimal.Decimal(1) - cursor))
+
+        return gaps
+
     def draw_background(self, face):
         """
         Draw the rack unit placeholders which form the "background" of the rack elevation.
         """
         x_offset = RACK_ELEVATION_BORDER_WIDTH + self.legend_width
-        url_string = '{}?{}&position={{}}'.format(
-            reverse('dcim:device_add'),
-            urlencode({
-                'site': self.rack.site.pk,
-                'location': self.rack.location.pk if self.rack.location else '',
-                'rack': self.rack.pk,
-                'face': face,
-            })
-        )
+        devices = list(self._get_face_devices(face))
 
         for ru in range(0, self.rack.u_height):
             unit = ru + 1 if self.rack.desc_units else self.rack.u_height - ru
             unit = unit + self.rack.starting_unit - 1
             y_offset = RACK_ELEVATION_BORDER_WIDTH + ru * self.unit_height
-            text_coords = (
-                x_offset + self.unit_width / 2,
-                y_offset + self.unit_height / 2
-            )
 
-            link = Hyperlink(href=url_string.format(unit), target='_parent')
-            link.add(Rect((x_offset, y_offset), (self.unit_width, self.unit_height), class_='slot'))
-            link.add(Text('add device', insert=text_coords, class_='add-device'))
+            for lane_offset, lane_width in self._get_background_gaps(unit, face, devices):
+                params = urlencode({
+                    'site': self.rack.site.pk,
+                    'location': self.rack.location.pk if self.rack.location else '',
+                    'rack': self.rack.pk,
+                    'face': face,
+                    'position': unit,
+                    'rack_position_offset': lane_offset,
+                    'rack_position_width': lane_width,
+                })
+                lane_x = x_offset + float(lane_offset) * self.unit_width
+                lane_pixel_width = float(lane_width) * self.unit_width
+                text_coords = (
+                    lane_x + lane_pixel_width / 2,
+                    y_offset + self.unit_height / 2
+                )
 
-            self.drawing.add(link)
+                link = Hyperlink(href=f'{reverse("dcim:device_add")}?{params}', target='_parent')
+                link.add(Rect((lane_x, y_offset), (lane_pixel_width, self.unit_height), class_='slot'))
+                if lane_pixel_width >= self.unit_width / 4:
+                    link.add(Text('add device', insert=text_coords, class_='add-device'))
 
-    def draw_face(self, face, opposite=False):
+                self.drawing.add(link)
+
+    def draw_face(self, face):
         """
         Draw any occupied rack units for the specified rack face.
         """
-        for unit in self.rack.get_rack_units(face=face, expand_devices=False):
-
-            # Loop through all units in the elevation
-            device = unit['device']
-            height = unit.get('height', decimal.Decimal(1.0))
-
-            device_coords = self._get_device_coords(unit['id'], height)
+        for device in self._get_face_devices(face):
+            height = device.device_type.u_height
+            lane_offset, lane_width = self._get_rendered_lane(device, face)
+            device_coords = self._get_device_coords(device.position, height, lane_offset)
             device_size = (
-                self.unit_width,
+                int(self.unit_width * lane_width),
                 int(self.unit_height * height)
             )
 
-            # Draw the device
-            if device and device.pk in self.permitted_device_ids:
-                if device.face == face and not opposite:
+            if device.pk in self.permitted_device_ids:
+                if device.face == face:
                     self.draw_device_front(device, device_coords, device_size)
                 else:
                     self.draw_device_rear(device, device_coords, device_size)
-
-            elif device:
+            else:
                 # Devices which the user does not have permission to view are rendered only as unavailable space
                 self.drawing.add(Rect(device_coords, device_size, class_='blocked'))
 

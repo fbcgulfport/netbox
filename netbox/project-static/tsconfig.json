@@ -13,6 +13,7 @@
     "target": "esnext",
     "jsx": "react",
     "strict": true,
+    "skipLibCheck": true,
     "baseUrl": "."
   },
   "include": ["src/**/*.ts", "./src/global.d.ts"],

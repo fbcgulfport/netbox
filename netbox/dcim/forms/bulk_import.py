@@ -457,9 +457,9 @@ class DeviceTypeImportForm(PrimaryModelImportForm):
     class Meta:
         model = DeviceType
         fields = [
-            'manufacturer', 'default_platform', 'model', 'slug', 'part_number', 'u_height', 'exclude_from_utilization',
-            'is_full_depth', 'subdevice_role', 'airflow', 'description', 'weight', 'weight_unit', 'owner', 'comments',
-            'tags',
+            'manufacturer', 'default_platform', 'model', 'slug', 'part_number', 'u_height', 'rack_position_width',
+            'exclude_from_utilization', 'is_full_depth', 'subdevice_role', 'airflow', 'description', 'weight',
+            'weight_unit', 'owner', 'comments', 'tags',
         ]
 
 
@@ -710,8 +710,9 @@ class DeviceImportForm(BaseDeviceImportForm):
     class Meta(BaseDeviceImportForm.Meta):
         fields = [
             'name', 'role', 'tenant', 'manufacturer', 'device_type', 'platform', 'serial', 'asset_tag', 'status',
-            'site', 'location', 'rack', 'position', 'face', 'latitude', 'longitude', 'parent', 'device_bay', 'airflow',
-            'virtual_chassis', 'vc_position', 'vc_priority', 'cluster', 'description', 'config_template', 'owner',
+            'site', 'location', 'rack', 'position', 'face', 'rack_position_offset', 'rack_position_width', 'latitude',
+            'longitude', 'parent', 'device_bay', 'airflow', 'virtual_chassis', 'vc_position', 'vc_priority', 'cluster',
+            'description', 'config_template', 'owner',
             'comments', 'tags',
         ]
 

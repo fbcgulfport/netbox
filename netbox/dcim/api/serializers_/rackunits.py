@@ -24,7 +24,10 @@ class RackUnitSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
     face = ChoiceField(choices=DeviceFaceChoices, read_only=True)
     device = DeviceSerializer(nested=True, read_only=True)
+    devices = DeviceSerializer(nested=True, many=True, read_only=True)
     occupied = serializers.BooleanField(read_only=True)
+    available = serializers.BooleanField(read_only=True)
+    unavailable = serializers.BooleanField(read_only=True)
     display = serializers.SerializerMethodField(read_only=True)
     description = serializers.SerializerMethodField(read_only=True)
 

@@ -1,3 +1,5 @@
+import decimal
+
 from django.utils.translation import gettext as _
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
@@ -211,6 +213,27 @@ class RackElevationDetailFilterSerializer(serializers.Serializer):
     )
     legend_width = serializers.IntegerField(
         default=RACK_ELEVATION_DEFAULT_LEGEND_WIDTH
+    )
+    rack_position_offset = serializers.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        min_value=decimal.Decimal(0),
+        max_value=decimal.Decimal(1),
+        required=False,
+        default=decimal.Decimal(0)
+    )
+    rack_position_width = serializers.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        min_value=decimal.Decimal('0.01'),
+        max_value=decimal.Decimal(1),
+        required=False,
+        allow_null=True,
+        default=None
+    )
+    device_type_id = serializers.IntegerField(
+        required=False,
+        default=None
     )
     margin_width = serializers.IntegerField(
         default=RACK_ELEVATION_DEFAULT_MARGIN_WIDTH

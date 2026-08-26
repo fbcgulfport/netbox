@@ -1,0 +1,101 @@
+{% extends base_template %}
+{% load helpers %}
+{% load static %}
+{% load i18n %}
+
+{% block title %}{% trans "Wiring Diagram" %} {{ scope_title }}{% endblock %}
+
+{% block head %}
+  {{ block.super }}
+  <style>
+    @media print {
+      @page {
+        size: landscape;
+        margin: 0.25in;
+      }
+
+      body * {
+        visibility: hidden !important;
+      }
+
+      #wiring-diagram,
+      #wiring-diagram * {
+        visibility: visible !important;
+      }
+
+      #wiring-diagram {
+        position: absolute !important;
+        inset: 0 auto auto 0 !important;
+        width: 100% !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: #ffffff !important;
+      }
+
+      #wiring-diagram .wiring-diagram {
+        width: 100% !important;
+        min-width: 0 !important;
+        height: auto !important;
+      }
+    }
+  </style>
+{% endblock head %}
+
+{% block content %}
+  <div class="card">
+    <h2 class="card-header">
+      {% blocktrans trimmed with scope=scope_title %}Wiring Diagram: {{ scope }}{% endblocktrans %}
+    </h2>
+    <div class="card-body">
+      <div class="text-secondary mb-3">{{ scope_subtitle }}</div>
+      {% if diagram.edges %}
+        <div class="wiring-diagram-toolbar mb-3">
+          <a href="{% url 'dcim:cable_list' %}{{ scope_filter_url }}" class="btn btn-sm btn-primary">
+            <i class="mdi mdi-cable-data" aria-hidden="true"></i> {% trans "Cables" %}
+          </a>
+          <a href="{% url 'dcim:wiring_diagram' %}" class="btn btn-sm btn-outline-primary">
+            <i class="mdi mdi-vector-combine" aria-hidden="true"></i> {% trans "All Wiring" %}
+          </a>
+          <a href="{{ return_url }}" class="btn btn-sm btn-outline-secondary">
+            <i class="mdi mdi-arrow-left" aria-hidden="true"></i> {% trans "Back" %}
+          </a>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-wiring-print disabled>
+            <i class="mdi mdi-printer" aria-hidden="true"></i> {% trans "Print / Save PDF" %}
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-wiring-open-svg disabled>
+            <i class="mdi mdi-open-in-new" aria-hidden="true"></i> {% trans "Open SVG" %}
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-wiring-download-svg disabled>
+            <i class="mdi mdi-download" aria-hidden="true"></i> {% trans "Download SVG" %}
+          </button>
+        </div>
+        <div
+          id="wiring-diagram"
+          class="wiring-diagram-wrap"
+          data-scope-title="{{ scope_title }}"
+          style="overflow: auto; min-height: 520px; border: 1px solid var(--tblr-border-color); border-radius: 4px; background: var(--tblr-bg-surface);"
+        >
+          <div class="text-secondary p-4">{% trans "Laying out wiring diagram..." %}</div>
+        </div>
+        {{ diagram|json_script:"wiring-diagram-data" }}
+      {% else %}
+        <div class="empty">
+          <div class="empty-icon">
+            <i class="mdi mdi-vector-polyline" aria-hidden="true"></i>
+          </div>
+          <p class="empty-title">{% trans "No cabled terminations found" %}</p>
+          <p class="empty-subtitle text-secondary">
+            {% trans "Cable interfaces, ports, or feeds in this scope to generate a wiring diagram automatically." %}
+          </p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock content %}
+
+{% block javascript %}
+  {{ block.super }}
+  <script src="{% static_with_params 'wiring_diagram.js' v='elk-label-place-1' %}"></script>
+{% endblock javascript %}

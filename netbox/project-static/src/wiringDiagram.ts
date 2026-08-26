@@ -1,0 +1,450 @@
+// @ts-nocheck
+import ELK from 'elkjs/lib/elk.bundled.js';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const EDGE_LABEL_HEIGHT = 14;
+const EDGE_LABEL_MARGIN = 5;
+const EDGE_LABEL_NODE_CLEARANCE = 8;
+
+function svgElement(name: string, attributes: Record<string, string | number> = {}) {
+  const element = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attributes)) {
+    element.setAttribute(key, String(value));
+  }
+  return element;
+}
+
+function truncate(value: string, length: number) {
+  if (!value || value.length <= length) {
+    return value || '';
+  }
+  return `${value.slice(0, length - 1)}…`;
+}
+
+function edgePath(section: any) {
+  const points = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+}
+
+function sectionPoints(section: any) {
+  return [section.startPoint, ...(section.bendPoints || []), section.endPoint].filter(Boolean);
+}
+
+function labelWidth(value: string) {
+  return Math.min(260, Math.max(60, value.length * 6));
+}
+
+function boxesIntersect(a: any, b: any) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function expandBox(box: any, padding: number) {
+  return {
+    x: box.x - padding,
+    y: box.y - padding,
+    width: box.width + padding * 2,
+    height: box.height + padding * 2,
+  };
+}
+
+function nodeObstacles(layout: any) {
+  return (layout.children || []).map((node: any) =>
+    expandBox(
+      {
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+      },
+      EDGE_LABEL_NODE_CLEARANCE,
+    ),
+  );
+}
+
+function labelBox(point: any, width: number) {
+  return {
+    x: point.x - width / 2 - EDGE_LABEL_MARGIN,
+    y: point.y - EDGE_LABEL_HEIGHT / 2 - EDGE_LABEL_MARGIN,
+    width: width + EDGE_LABEL_MARGIN * 2,
+    height: EDGE_LABEL_HEIGHT + EDGE_LABEL_MARGIN * 2,
+  };
+}
+
+function segmentCandidates(section: any, width: number) {
+  const candidates = [];
+  const points = sectionPoints(section);
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    const length = Math.hypot(end.x - start.x, end.y - start.y);
+    if (length < Math.max(width * 0.75, 54)) {
+      continue;
+    }
+    for (const ratio of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+      candidates.push({
+        point: {
+          x: start.x + (end.x - start.x) * ratio,
+          y: start.y + (end.y - start.y) * ratio,
+        },
+        length,
+        centerBias: Math.abs(ratio - 0.5),
+      });
+    }
+  }
+  return candidates;
+}
+
+function chooseLabelPoint(edge: any, text: string, nodeBoxes: any[], usedLabelBoxes: any[]) {
+  const width = labelWidth(text);
+  const elkLabel = edge.labels?.[0];
+  const preferredPoint =
+    elkLabel && Number.isFinite(elkLabel.x)
+      ? { x: elkLabel.x + (elkLabel.width || width) / 2, y: elkLabel.y + (elkLabel.height || EDGE_LABEL_HEIGHT) / 2 }
+      : null;
+  const candidates = (edge.sections || []).flatMap((section: any) => segmentCandidates(section, width));
+
+  if (preferredPoint) {
+    candidates.push({ point: preferredPoint, length: 0, centerBias: 0.1, preferred: true });
+  }
+
+  const ranked = candidates
+    .map((candidate: any) => ({
+      ...candidate,
+      box: labelBox(candidate.point, width),
+      score:
+        (preferredPoint ? Math.hypot(candidate.point.x - preferredPoint.x, candidate.point.y - preferredPoint.y) : 0) +
+        candidate.centerBias * 80 -
+        candidate.length * 0.08 +
+        (candidate.preferred ? -40 : 0),
+    }))
+    .sort((a: any, b: any) => a.score - b.score);
+
+  const clearCandidate = ranked.find(
+    (candidate: any) =>
+      !nodeBoxes.some((box: any) => boxesIntersect(candidate.box, box)) &&
+      !usedLabelBoxes.some((box: any) => boxesIntersect(candidate.box, box)),
+  );
+  const nodeClearCandidate = ranked.find((candidate: any) => !nodeBoxes.some((box: any) => boxesIntersect(candidate.box, box)));
+  const candidate = clearCandidate || nodeClearCandidate;
+
+  if (!candidate) {
+    return null;
+  }
+  usedLabelBoxes.push(candidate.box);
+  return { ...candidate.point, width };
+}
+
+function portSides(data: any) {
+  const ranks = new Map(data.nodes.map((node: any) => [node.key, node.rank]));
+  const portNodes = new Map();
+  for (const node of data.nodes) {
+    for (const port of node.ports) {
+      portNodes.set(port.id, node.key);
+    }
+  }
+  const sides = new Map();
+  for (const edge of data.edges) {
+    const sourceRanks = edge.sources.map((port: string) => ranks.get(portNodes.get(port)) ?? 1);
+    const targetRanks = edge.targets.map((port: string) => ranks.get(portNodes.get(port)) ?? 1);
+    const sourceRank = sourceRanks.reduce((sum: number, rank: number) => sum + rank, 0) / sourceRanks.length;
+    const targetRank = targetRanks.reduce((sum: number, rank: number) => sum + rank, 0) / targetRanks.length;
+    for (const port of edge.sources) {
+      sides.set(port, sourceRank <= targetRank ? 'EAST' : 'WEST');
+    }
+    for (const port of edge.targets) {
+      sides.set(port, sourceRank <= targetRank ? 'WEST' : 'EAST');
+    }
+  }
+  return sides;
+}
+
+function buildElkGraph(data: any) {
+  const sides = portSides(data);
+  return {
+    id: 'wiring-root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'RIGHT',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '110',
+      'elk.spacing.nodeNode': '70',
+      'elk.spacing.edgeEdge': '18',
+      'elk.spacing.edgeNode': '42',
+      'elk.spacing.edgeLabel': '22',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.crossingMinimization.semiInteractive': 'true',
+      'elk.layered.mergeEdges': 'false',
+      'elk.layered.unnecessaryBendpoints': 'true',
+      'elk.layered.edgeLabels.sideSelection': 'SMART',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+      'elk.padding': '[top=32,left=32,bottom=32,right=32]',
+    },
+    children: data.nodes.map((node: any) => ({
+      id: node.key,
+      width: node.width,
+      height: node.height,
+      ports: node.ports.map((port: any) => ({
+        id: port.id,
+        width: 8,
+        height: 8,
+        layoutOptions: {
+          'elk.port.side': sides.get(port.id) || 'EAST',
+        },
+      })),
+      layoutOptions: {
+        'elk.portConstraints': 'FIXED_SIDE',
+        'elk.layered.layering.layerConstraint': node.external ? 'FIRST' : 'NONE',
+      },
+    })),
+    edges: data.edges.map((edge: any) => ({
+      id: edge.id,
+      sources: edge.sources,
+      targets: edge.targets,
+      labels: edge.label
+        ? [
+            {
+              text: edge.label,
+              width: Math.min(260, Math.max(60, edge.label.length * 6)),
+              height: 15,
+            },
+          ]
+        : [],
+    })),
+  };
+}
+
+function renderNode(svg: SVGElement, node: any, source: any) {
+  if (!source) {
+    return;
+  }
+  const group = svgElement('g', { class: `wiring-node${source.external ? ' external' : ''}` });
+  const link = svgElement('a', { href: source.url || '#' });
+  const rect = svgElement('rect', {
+    x: node.x,
+    y: node.y,
+    width: node.width,
+    height: node.height,
+    rx: 4,
+  });
+  link.appendChild(rect);
+
+  const title = svgElement('text', { class: 'wiring-node-title', x: node.x + 14, y: node.y + 22 });
+  title.textContent = truncate(source.title, 34);
+  link.appendChild(title);
+
+  const subtitle = svgElement('text', { class: 'wiring-node-subtitle', x: node.x + 14, y: node.y + 40 });
+  subtitle.textContent = truncate(source.subtitle, 38);
+  link.appendChild(subtitle);
+
+  group.appendChild(link);
+
+  const portsById = new Map(source.ports.map((port: any) => [port.id, port]));
+  for (const port of node.ports || []) {
+    const sourcePort = portsById.get(port.id);
+    const portX = node.x + port.x + port.width / 2;
+    const portY = node.y + port.y + port.height / 2;
+    const textAnchor = portX < node.x + node.width / 2 ? 'start' : 'end';
+    const textX = textAnchor === 'start' ? node.x + 16 : node.x + node.width - 16;
+    const portLink = svgElement('a', { href: sourcePort?.url || source.url || '#' });
+    portLink.appendChild(svgElement('circle', { class: 'wiring-port', cx: portX, cy: portY, r: 4 }));
+    const label = svgElement('text', {
+      class: 'wiring-port-text',
+      x: textX,
+      y: portY + 3,
+      'text-anchor': textAnchor,
+    });
+    label.textContent = truncate(sourcePort?.label || '', 30);
+    portLink.appendChild(label);
+    group.appendChild(portLink);
+  }
+
+  svg.appendChild(group);
+}
+
+function renderEdge(svg: SVGElement, edge: any, source: any) {
+  if (!source) {
+    return;
+  }
+  for (const section of edge.sections || []) {
+    const path = edgePath(section);
+    const link = svgElement('a', { href: source.url || '#' });
+    link.appendChild(svgElement('path', { class: 'wiring-link-hit', d: path }));
+    link.appendChild(svgElement('path', { class: 'wiring-link', d: path, stroke: source.color || '#a23c3c' }));
+    const title = svgElement('title');
+    title.textContent = `${source.label || 'Cable'}: ${source.source_label} → ${source.target_label}`;
+    link.appendChild(title);
+    svg.appendChild(link);
+  }
+}
+
+function renderEdgeLabel(svg: SVGElement, edge: any, source: any, nodeBoxes: any[], usedLabelBoxes: any[]) {
+  if (!source) {
+    return;
+  }
+  const value = truncate(source.label || `${source.source_label} → ${source.target_label}`, 42);
+  const labelPoint = chooseLabelPoint(edge, value, nodeBoxes, usedLabelBoxes);
+  if (labelPoint) {
+    const group = svgElement('g', { class: 'wiring-link-label-group' });
+    group.appendChild(
+      svgElement('rect', {
+        class: 'wiring-link-label-bg',
+        x: labelPoint.x - labelPoint.width / 2 - 3,
+        y: labelPoint.y - EDGE_LABEL_HEIGHT / 2 - 2,
+        width: labelPoint.width + 6,
+        height: EDGE_LABEL_HEIGHT + 4,
+        rx: 3,
+      }),
+    );
+    const text = svgElement('text', {
+      class: 'wiring-link-label',
+      x: labelPoint.x,
+      y: labelPoint.y + 3,
+      'text-anchor': 'middle',
+    });
+    text.textContent = value;
+    group.appendChild(text);
+    svg.appendChild(group);
+  }
+}
+
+function renderDiagram(container: HTMLElement, data: any, layout: any) {
+  const nodesById = new Map(data.nodes.map((node: any) => [node.key, node]));
+  const edgesById = new Map(data.edges.map((edge: any) => [edge.id, edge]));
+  const width = Math.ceil((layout.width || 960) + 64);
+  const height = Math.ceil((layout.height || 520) + 64);
+  const scopeTitle = container.dataset.scopeTitle || 'Wiring Diagram';
+
+  const svg = svgElement('svg', {
+    class: 'wiring-diagram',
+    xmlns: SVG_NS,
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': scopeTitle,
+  }) as SVGElement;
+
+  const style = svgElement('style');
+  style.textContent = `
+    .wiring-diagram { min-width: 1100px; width: 100%; height: auto; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wiring-page { fill: #fbfbfc; }
+    .wiring-node rect { fill: #ffffff; stroke: #8a96a8; stroke-width: 1.2; }
+    .wiring-node.external rect { fill: #f8fafc; stroke-dasharray: 5 4; }
+    .wiring-node-title { fill: #162033; font-size: 13px; font-weight: 700; }
+    .wiring-node-subtitle { fill: #526071; font-size: 10px; }
+    .wiring-port { fill: #ffffff; stroke: #7a2d2d; stroke-width: 1.4; }
+    .wiring-port-text { fill: #334155; font-size: 9px; }
+    .wiring-link { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+    .wiring-link-hit { fill: none; stroke: transparent; stroke-width: 14; }
+    .wiring-link-label-bg { fill: #fbfbfc; stroke: rgba(122, 45, 45, 0.18); stroke-width: 0.6; }
+    .wiring-link-label { fill: #7a2d2d; font-size: 10px; }
+  `;
+  svg.appendChild(style);
+  svg.appendChild(svgElement('rect', { class: 'wiring-page', x: 0, y: 0, width, height }));
+
+  for (const edge of layout.edges || []) {
+    renderEdge(svg, edge, edgesById.get(edge.id));
+  }
+  for (const node of layout.children || []) {
+    renderNode(svg, node, nodesById.get(node.id));
+  }
+  const obstacles = nodeObstacles(layout);
+  const usedLabelBoxes = [];
+  for (const edge of layout.edges || []) {
+    renderEdgeLabel(svg, edge, edgesById.get(edge.id), obstacles, usedLabelBoxes);
+  }
+
+  container.replaceChildren(svg);
+}
+
+function diagramSvg(container: HTMLElement) {
+  return container.querySelector('svg.wiring-diagram') as SVGElement | null;
+}
+
+function exportFilename(container: HTMLElement) {
+  const scopeTitle = container.dataset.scopeTitle || 'wiring-diagram';
+  const safeTitle = scopeTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${safeTitle || 'wiring-diagram'}.svg`;
+}
+
+function serializeDiagram(container: HTMLElement) {
+  const svg = diagramSvg(container);
+  if (!svg) {
+    return null;
+  }
+
+  const clone = svg.cloneNode(true) as SVGElement;
+  clone.setAttribute('xmlns', SVG_NS);
+  clone.setAttribute('version', '1.1');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
+}
+
+function diagramBlobUrl(container: HTMLElement) {
+  const serialized = serializeDiagram(container);
+  if (!serialized) {
+    return null;
+  }
+  return URL.createObjectURL(new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' }));
+}
+
+function setupExportControls(container: HTMLElement) {
+  const printButton = document.querySelector('[data-wiring-print]') as HTMLButtonElement | null;
+  const openSvgButton = document.querySelector('[data-wiring-open-svg]') as HTMLButtonElement | null;
+  const downloadSvgButton = document.querySelector('[data-wiring-download-svg]') as HTMLButtonElement | null;
+  const controls = [printButton, openSvgButton, downloadSvgButton].filter(Boolean) as HTMLButtonElement[];
+
+  for (const control of controls) {
+    control.disabled = !diagramSvg(container);
+  }
+
+  printButton?.addEventListener('click', () => {
+    window.print();
+  });
+
+  openSvgButton?.addEventListener('click', () => {
+    const url = diagramBlobUrl(container);
+    if (!url) {
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+
+  downloadSvgButton?.addEventListener('click', () => {
+    const url = diagramBlobUrl(container);
+    if (!url) {
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = exportFilename(container);
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+}
+
+async function initWiringDiagram() {
+  const container = document.getElementById('wiring-diagram');
+  const script = document.getElementById('wiring-diagram-data');
+  if (!container || !script?.textContent) {
+    return;
+  }
+
+  const data = JSON.parse(script.textContent);
+  const elk = new ELK();
+  try {
+    const layout = await elk.layout(buildElkGraph(data));
+    renderDiagram(container, data, layout);
+    setupExportControls(container);
+  } catch (error) {
+    container.replaceChildren();
+    const message = document.createElement('div');
+    message.className = 'alert alert-danger m-3';
+    message.textContent = `Unable to lay out wiring diagram: ${error instanceof Error ? error.message : error}`;
+    container.appendChild(message);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', initWiringDiagram);

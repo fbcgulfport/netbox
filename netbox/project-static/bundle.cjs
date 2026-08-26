@@ -75,6 +75,8 @@ async function bundleGraphIQL() {
 async function bundleNetBox() {
   const entryPoints = {
     netbox: 'src/index.ts',
+    rack_reorder: 'src/rackReorderEntry.ts',
+    wiring_diagram: 'src/wiringDiagram.ts',
   };
   try {
     const result = await esbuild.build({
@@ -111,6 +113,7 @@ async function bundleStyles() {
       'netbox-external': 'styles/external.scss',
       'netbox': 'styles/netbox.scss',
       rack_elevation: 'styles/svg/rack_elevation.scss',
+      rack_reorder: 'styles/rack_reorder.scss',
       cable_trace: 'styles/svg/cable_trace.scss',
     };
     const pluginOptions = { outputStyle: 'compressed' };

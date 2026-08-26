@@ -1,3 +1,5 @@
+import decimal
+
 from django import forms
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
@@ -523,6 +525,12 @@ class DeviceTypeBulkEditForm(PrimaryModelBulkEditForm):
         min_value=0,
         required=False
     )
+    rack_position_width = forms.DecimalField(
+        label=_('Rack row width'),
+        min_value=decimal.Decimal('0.01'),
+        max_value=1,
+        required=False
+    )
     is_full_depth = forms.NullBooleanField(
         required=False,
         widget=BulkEditNullBooleanSelect(),
@@ -553,8 +561,8 @@ class DeviceTypeBulkEditForm(PrimaryModelBulkEditForm):
     model = DeviceType
     fieldsets = (
         FieldSet(
-            'manufacturer', 'default_platform', 'part_number', 'u_height', 'exclude_from_utilization', 'is_full_depth',
-            'airflow', 'description', name=_('Device Type')
+            'manufacturer', 'default_platform', 'part_number', 'u_height', 'rack_position_width',
+            'exclude_from_utilization', 'is_full_depth', 'airflow', 'description', name=_('Device Type')
         ),
         FieldSet('weight', 'weight_unit', name=_('Weight')),
     )
@@ -725,6 +733,18 @@ class DeviceBulkEditForm(PrimaryModelBulkEditForm):
         choices=add_blank_choice(DeviceAirflowChoices),
         required=False
     )
+    rack_position_offset = forms.DecimalField(
+        label=_('Rack row offset'),
+        min_value=0,
+        max_value=1,
+        required=False
+    )
+    rack_position_width = forms.DecimalField(
+        label=_('Rack row width'),
+        min_value=decimal.Decimal('0.01'),
+        max_value=1,
+        required=False
+    )
     serial = forms.CharField(
         max_length=50,
         required=False,
@@ -747,7 +767,7 @@ class DeviceBulkEditForm(PrimaryModelBulkEditForm):
     model = Device
     fieldsets = (
         FieldSet('role', 'status', 'tenant', 'platform', 'description', name=_('Device')),
-        FieldSet('site', 'location', name=_('Location')),
+        FieldSet('site', 'location', 'rack_position_offset', 'rack_position_width', name=_('Location')),
         FieldSet('manufacturer', 'device_type', 'airflow', 'serial', name=_('Hardware')),
         FieldSet('config_template', name=_('Configuration')),
         FieldSet('cluster', name=_('Virtualization')),

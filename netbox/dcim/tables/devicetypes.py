@@ -102,6 +102,10 @@ class DeviceTypeTable(PrimaryModelTable):
         verbose_name=_('U Height'),
         template_code='{{ value|floatformat }}'
     )
+    rack_position_width = columns.TemplateColumn(
+        verbose_name=_('Rack Row Width'),
+        template_code='{{ value|floatformat }}'
+    )
     exclude_from_utilization = columns.BooleanColumn(
         verbose_name=_('Exclude from utilization'),
         false_mark=None
@@ -151,11 +155,12 @@ class DeviceTypeTable(PrimaryModelTable):
         model = models.DeviceType
         fields = (
             'pk', 'id', 'model', 'manufacturer', 'default_platform', 'slug', 'part_number', 'u_height',
-            'exclude_from_utilization', 'is_full_depth', 'subdevice_role', 'airflow', 'weight',
+            'rack_position_width', 'exclude_from_utilization', 'is_full_depth', 'subdevice_role', 'airflow', 'weight',
             'description', 'comments', 'device_count', 'tags', 'created', 'last_updated',
         )
         default_columns = (
-            'pk', 'model', 'manufacturer', 'part_number', 'u_height', 'is_full_depth', 'device_count',
+            'pk', 'model', 'manufacturer', 'part_number', 'u_height', 'rack_position_width', 'is_full_depth',
+            'device_count',
         )
 
 
